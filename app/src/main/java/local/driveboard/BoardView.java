@@ -32,6 +32,7 @@ public final class BoardView extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private BoardLayout layout = BoardLayout.defaults();
+    private String mode = Store.FULL;
     private WidgetData.PrayerSnapshot prayer;
     private WidgetData.BatterySnapshot battery;
     private String[] media = {DASH, DASH};
@@ -68,9 +69,18 @@ public final class BoardView extends View {
         invalidate();
     }
 
+    public void setMode(String value) {
+        String next = Store.SPLIT.equals(value) ? Store.SPLIT : Store.FULL;
+        if (!next.equals(mode)) {
+            mode = next;
+            dragging = null;
+            refresh();
+        }
+    }
+
     public void refresh() {
         if (dragging == null) {
-            layout = BoardLayout.fromJson(Store.prefs(getContext()).getString("layout", ""));
+            layout = Store.layout(getContext(), mode);
         }
         words = AppLocale.wrap(getContext());
         Date now = new Date();
@@ -359,18 +369,20 @@ public final class BoardView extends View {
         float secondary = Math.min(16f * unit(), r.height() * .20f);
         float size = fit(percent, Math.min(32f * unit(), r.height() * .40f),
                 r.width(), Fonts.extraBold(getContext()));
-        float blockHeight = size + secondary * 1.3f;
+        float blockHeight = size + secondary * 2.2f;
         float y = r.top + (r.height() - blockHeight) / 2f + size;
-        float rangeY = stale ? Math.min(r.bottom - secondary, y + secondary * 1.2f)
-                : Math.min(r.bottom, y + secondary * 1.3f);
-        if (carRender != null) {
+        float rangeTop = Math.min(r.bottom, y + secondary * .25f);
+        RectF rangeBounds = new RectF(r.left, rangeTop, r.right,
+                stale ? Math.max(rangeTop, r.bottom - secondary * .8f) : r.bottom);
+        boolean showRender = carRender != null;
+        if (showRender) {
             float imageBottom = y - size;
             float photoHeight = Math.max(0f, imageBottom - r.top);
             if (photoHeight < r.height() * .35f) {
-                carRender = null;
+                showRender = false;
             }
         }
-        if (carRender != null) {
+        if (showRender) {
             RectF imageBounds = new RectF(r.left, r.top, r.right, y - size);
             float scale = Math.min(imageBounds.width() / carRender.getWidth(),
                     imageBounds.height() / carRender.getHeight());
@@ -385,9 +397,7 @@ public final class BoardView extends View {
             canvas.drawBitmap(carRender, null, destination, paint);
             text(canvas, percent, r.left, y, size, stale ? DIM : CREAM,
                     Fonts.extraBold(getContext()), r.width());
-            text(canvas, range, r.left, rangeY,
-                    fit(range, secondary, r.width(), Fonts.regular(getContext())),
-                    stale ? DIM : SOFT, Fonts.regular(getContext()), r.width());
+            stateText(canvas, range, rangeBounds, secondary, stale ? DIM : SOFT);
             if (stale && battery.updated != null && !battery.updated.isEmpty()) {
                 String updated = words.getString(R.string.board_updated, battery.updated);
                 text(canvas, updated, r.left, r.bottom,
@@ -399,10 +409,7 @@ public final class BoardView extends View {
         }
         text(canvas, percent, r.left, y, size, stale ? DIM : CREAM,
                 Fonts.extraBold(getContext()), r.width());
-        text(canvas, range, r.left, rangeY,
-                fit(range, secondary, r.width(), Fonts.regular(getContext())),
-                stale ? DIM : SOFT,
-                Fonts.regular(getContext()), r.width());
+        stateText(canvas, range, rangeBounds, secondary, stale ? DIM : SOFT);
         if (stale && battery.updated != null && !battery.updated.isEmpty()) {
             String updated = words.getString(R.string.board_updated, battery.updated);
             text(canvas, updated, r.left, r.bottom,
@@ -531,7 +538,8 @@ public final class BoardView extends View {
                 } else {
                     layout.move(dragging, startCol + dx, startRow + dy);
                 }
-                Store.prefs(getContext()).edit().putString("layout", layout.toJson()).apply();
+                Store.prefs(getContext()).edit()
+                        .putString(Store.layoutKey(mode), layout.toJson()).apply();
                 invalidate();
                 return true;
             case MotionEvent.ACTION_UP:

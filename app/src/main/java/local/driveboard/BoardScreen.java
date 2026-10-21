@@ -39,7 +39,9 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
     private final SharedPreferences.OnSharedPreferenceChangeListener prefsListener =
             (preferences, key) -> {
                 if (!"surface_width".equals(key) && !"surface_height".equals(key)
-                        && !"visible_width".equals(key) && !"visible_height".equals(key)) {
+                        && !"visible_width".equals(key) && !"visible_height".equals(key)
+                        && !"full_width".equals(key) && !"full_height".equals(key)
+                        && !"split_width".equals(key) && !"split_height".equals(key)) {
                     drawBoard();
                 }
             };
@@ -60,6 +62,10 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
     private boolean started;
     private CarInfo carInfo;
     private boolean energyListening;
+    private Boolean lastNight;
+    private String lastMode;
+    private int lastDrawWidth;
+    private int lastDrawHeight;
     private final OnCarDataAvailableListener<EnergyLevel> energyListener = this::onEnergyLevel;
 
     public BoardScreen(@NonNull CarContext carContext) {
@@ -183,11 +189,28 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
             drawArea.set(bounds);
         }
 
-        if (prefs.getInt("visible_width", 0) != drawArea.width() || prefs.getInt("visible_height", 0) != drawArea.height()) {
-            prefs.edit().putInt("visible_width", drawArea.width()).putInt("visible_height", drawArea.height()).apply();
+        int drawWidth = drawArea.width();
+        int drawHeight = drawArea.height();
+        String mode = drawWidth / (float) drawHeight < 1.4f ? Store.SPLIT : Store.FULL;
+        String prefix = mode + "_";
+        if (prefs.getInt(prefix + "width", 0) != drawWidth
+                || prefs.getInt(prefix + "height", 0) != drawHeight) {
+            prefs.edit().putInt(prefix + "width", drawWidth)
+                    .putInt(prefix + "height", drawHeight).apply();
         }
-
-        board.setCarNight(getCarContext().isDarkMode());
+        boolean night = getCarContext().isDarkMode();
+        if (lastNight == null || lastNight != night) {
+            Log.i(CAR_TAG, "Night mode=" + night);
+            lastNight = night;
+        }
+        if (!mode.equals(lastMode) || drawWidth != lastDrawWidth || drawHeight != lastDrawHeight) {
+            Log.i(CAR_TAG, "Layout mode=" + mode + " draw=" + drawWidth + "x" + drawHeight);
+            lastMode = mode;
+            lastDrawWidth = drawWidth;
+            lastDrawHeight = drawHeight;
+        }
+        board.setMode(mode);
+        board.setCarNight(night);
         board.refresh();
         int measuredWidth = View.MeasureSpec.makeMeasureSpec(drawArea.width(), View.MeasureSpec.EXACTLY);
         int measuredHeight = View.MeasureSpec.makeMeasureSpec(drawArea.height(), View.MeasureSpec.EXACTLY);

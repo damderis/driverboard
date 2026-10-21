@@ -65,6 +65,9 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     private String locationMessage;
     private boolean locating;
     private boolean night;
+    private String selectedMode = Store.FULL;
+    private Button fullModeButton;
+    private Button splitModeButton;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -111,6 +114,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         scroll.addView(content);
 
         addTitle(content);
+        addModeSelector(content, tone);
         addBoard(content, tone);
         LinearLayout card = column();
         card.setBackground(shape(cardColor, 14));
@@ -141,6 +145,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private void addBoard(LinearLayout content, Tone tone) {
         board = new BoardView(this);
+        board.setMode(selectedMode);
         board.setBackground(shape(tone.ground, 14));
         if (night) {
             GradientDrawable edge = shape(Color.TRANSPARENT, 14);
@@ -158,6 +163,49 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         hint.setTextColor(muted);
         hint.setPadding(dp(8), dp(10), dp(8), dp(10));
         content.addView(hint);
+    }
+
+    private void addModeSelector(LinearLayout content, Tone tone) {
+        LinearLayout segments = new LinearLayout(this);
+        segments.setPadding(dp(3), dp(3), dp(3), dp(3));
+        segments.setBackground(shape(cardColor, 24));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(54));
+        params.bottomMargin = dp(10);
+        content.addView(segments, params);
+        fullModeButton = modeButton(segments, R.string.full_screen, Store.FULL, tone);
+        splitModeButton = modeButton(segments, R.string.split_screen, Store.SPLIT, tone);
+        updateModeButtons(tone);
+    }
+
+    private Button modeButton(LinearLayout segments, int label, String mode, Tone tone) {
+        Button option = new Button(this);
+        option.setText(label);
+        option.setTextSize(13);
+        option.setAllCaps(false);
+        option.setStateListAnimator(null);
+        option.setTypeface(Fonts.semibold(this));
+        option.setMinWidth(0);
+        option.setMinimumHeight(dp(48));
+        option.setPadding(dp(6), 0, dp(6), 0);
+        option.setOnClickListener(view -> {
+            selectedMode = mode;
+            board.setMode(mode);
+            updateModeButtons(tone);
+            updateAspect();
+        });
+        segments.addView(option, new LinearLayout.LayoutParams(0, dp(48), 1));
+        return option;
+    }
+
+    private void updateModeButtons(Tone tone) {
+        styleModeButton(fullModeButton, Store.FULL.equals(selectedMode), tone);
+        styleModeButton(splitModeButton, Store.SPLIT.equals(selectedMode), tone);
+    }
+
+    private void styleModeButton(Button button, boolean selected, Tone tone) {
+        button.setSelected(selected);
+        button.setBackground(shape(selected ? filledControlColor(tone) : Color.TRANSPARENT, 21));
+        button.setTextColor(selected ? filledControlTextColor(tone) : ink);
     }
 
     private void addPrayerRow(LinearLayout card) {
@@ -356,7 +404,10 @@ public final class MainActivity extends Activity implements SharedPreferences.On
                 .setTitle(R.string.reset_layout)
                 .setMessage(R.string.reset_layout_confirmation)
                 .setPositiveButton(R.string.reset_action, (dialog, which) -> Store.prefs(this).edit()
-                        .putString("layout", BoardLayout.defaults().toJson()).apply())
+                        .putString(Store.layoutKey(selectedMode),
+                                (Store.SPLIT.equals(selectedMode)
+                                        ? BoardLayout.splitDefaults() : BoardLayout.defaults()).toJson())
+                        .apply())
                 .setNegativeButton(R.string.cancel_action, null)
                 .show());
         content.addView(reset, new LinearLayout.LayoutParams(-1, -2));
@@ -555,10 +606,9 @@ public final class MainActivity extends Activity implements SharedPreferences.On
             return;
         }
         SharedPreferences prefs = Store.prefs(this);
-        int width = Math.max(1, prefs.getInt("visible_width",
-                prefs.getInt("surface_width", 1920)));
-        int height = Math.max(1, prefs.getInt("visible_height",
-                prefs.getInt("surface_height", 1080)));
+        boolean split = Store.SPLIT.equals(selectedMode);
+        int width = Math.max(1, prefs.getInt(selectedMode + "_width", split ? 1190 : 1920));
+        int height = Math.max(1, prefs.getInt(selectedMode + "_height", split ? 1050 : 1080));
         int desired = Math.max(1, Math.round(board.getWidth() * height / (float) width));
         if (board.getLayoutParams().height != desired) {
             board.getLayoutParams().height = desired;

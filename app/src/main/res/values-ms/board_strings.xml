@@ -1,4 +1,6 @@
 <resources>
+    <string name="full_screen">Skrin penuh</string>
+    <string name="split_screen">Skrin belah</string>
     <string name="board_clock">Masa</string>
     <string name="board_next_prayer">Solat seterusnya</string>
     <string name="board_now_playing">Sedang dimainkan</string>

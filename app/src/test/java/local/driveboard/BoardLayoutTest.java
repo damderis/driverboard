@@ -33,6 +33,32 @@ public class BoardLayoutTest {
     }
 
     @Test
+    public void splitDefaultAndSavedLayoutsStayIndependent() {
+        BoardLayout split = BoardLayout.splitDefaults();
+        assertEquals("prayer:0,0,12,3;clock:0,3,6,3;battery:6,3,6,3",
+                positions(split));
+        BoardLayout.Card clock = split.cards.get(1);
+        split.move(clock, 2, 3);
+        assertEquals(split.toJson(), BoardLayout.fromJson(split.toJson(), true).toJson());
+        assertEquals(BoardLayout.splitDefaults().toJson(),
+                BoardLayout.fromJson(BoardLayout.defaults().toJson(), true).toJson());
+        assertEquals(BoardLayout.defaults().toJson(),
+                BoardLayout.fromJson(split.toJson()).toJson());
+    }
+
+    @Test
+    public void legacySingleLayoutMigratesOnlyToUnsavedFullMode() {
+        BoardLayout legacy = BoardLayout.defaults();
+        legacy.move(legacy.cards.get(0), 2, 0);
+        String legacyJson = legacy.toJson();
+        assertEquals(legacyJson, BoardLayout.fromSaved(null, legacyJson, false).toJson());
+        assertEquals(BoardLayout.splitDefaults().toJson(),
+                BoardLayout.fromSaved(null, legacyJson, true).toJson());
+        assertEquals(BoardLayout.defaults().toJson(),
+                BoardLayout.fromSaved(BoardLayout.defaults().toJson(), legacyJson, false).toJson());
+    }
+
+    @Test
     public void migratesOldDefaultAndPreservesCustomCards() {
         String old = "[{\"type\":\"clock\",\"col\":0,\"row\":0,\"w\":4,\"h\":6},"
                 + "{\"type\":\"prayer\",\"col\":4,\"row\":0,\"w\":4,\"h\":6},"

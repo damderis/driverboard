@@ -55,6 +55,14 @@ public final class BoardLayout {
         return b;
     }
 
+    public static BoardLayout splitDefaults() {
+        BoardLayout b = new BoardLayout();
+        b.cards.add(new Card("prayer", 0, 0, 12, 3));
+        b.cards.add(new Card("clock", 0, 3, 6, 3));
+        b.cards.add(new Card("battery", 6, 3, 6, 3));
+        return b;
+    }
+
     public String toJson() {
         StringBuilder s = new StringBuilder("[");
         for (Card c : cards) {
@@ -70,8 +78,16 @@ public final class BoardLayout {
 
     // Fixed schema written by this app, deliberately independent of org.json on Android.
     public static BoardLayout fromJson(String json) {
+        return fromJson(json, false);
+    }
+
+    public static BoardLayout fromSaved(String current, String legacy, boolean split) {
+        return fromJson(current == null && !split ? legacy : current, split);
+    }
+
+    public static BoardLayout fromJson(String json, boolean split) {
         if (json == null) {
-            return defaults();
+            return split ? splitDefaults() : defaults();
         }
         Pattern p = Pattern.compile("\\{\\s*\"type\"\\s*:\\s*\"(clock|prayer|media|battery)\"\\s*,\\s*\"col\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"row\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"w\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"h\"\\s*:\\s*(-?\\d+)\\s*\\}");
         BoardLayout b = new BoardLayout();
@@ -81,7 +97,7 @@ public final class BoardLayout {
                 String type = m.group(1);
                 for (Card c : b.cards) {
                     if (c.type.equals(type)) {
-                        return defaults();
+                        return split ? splitDefaults() : defaults();
                     }
                 }
                 b.cards.add(new Card(type, Integer.parseInt(m.group(2)),
@@ -89,7 +105,19 @@ public final class BoardLayout {
                         Integer.parseInt(m.group(5))));
             }
         } catch (RuntimeException e) {
-            return defaults();
+            return split ? splitDefaults() : defaults();
+        }
+        if (split) {
+            boolean prayer = false;
+            boolean clock = false;
+            boolean battery = false;
+            for (Card c : b.cards) {
+                prayer |= "prayer".equals(c.type);
+                clock |= "clock".equals(c.type);
+                battery |= "battery".equals(c.type);
+            }
+            return b.cards.size() == 3 && prayer && clock && battery
+                    ? b : splitDefaults();
         }
         if (b.cards.size() == 4) {
             return b;
