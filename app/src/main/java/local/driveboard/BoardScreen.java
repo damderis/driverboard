@@ -92,13 +92,17 @@ public final class BoardScreen extends Screen {
     private int fps = 30;
     private long lastRefresh;
     private boolean refreshNeeded = true;
+    private boolean transitionLogging;
+    private long transitionFrameTotalNanos;
+    private int transitionFrameCount;
 
     private void onFrame(long nanos) {
         frameScheduled = false;
-        if (!started || surface == null || !surface.isValid() || !board.isMediaPlaying()) {
+        if (!started || surface == null || !surface.isValid()
+                || (!board.isMediaPlaying() && !board.isTransitioning())) {
             return;
         }
-        if (nanos - lastFrame >= 1_000_000_000L / fps) {
+        if (board.isTransitioning() || nanos - lastFrame >= 1_000_000_000L / fps) {
             lastFrame = nanos;
             long start = android.os.SystemClock.elapsedRealtimeNanos();
             drawBoard();
@@ -113,7 +117,8 @@ public final class BoardScreen extends Screen {
     }
 
     private void scheduleFrame() {
-        if (started && surface != null && board.isMediaPlaying() && !frameScheduled) {
+        if (started && surface != null && surface.isValid()
+                && (board.isMediaPlaying() || board.isTransitioning()) && !frameScheduled) {
             frameScheduled = true;
             android.view.Choreographer.getInstance().postFrameCallback(frameCallback);
         }
@@ -260,6 +265,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = false;
+        board.cancelLayoutTransition();
         android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
         frameScheduled = false;
         drawQueued = false;
@@ -313,6 +319,11 @@ public final class BoardScreen extends Screen {
         CarDiagnostics.log(getCarContext(), "Surface available " + nextContainer.getWidth()
                 + "x" + nextContainer.getHeight() + " dpi=" + nextContainer.getDpi());
         Surface nextSurface = nextContainer.getSurface();
+        board.cancelLayoutTransition();
+        lastMode = null;
+        lastDrawWidth = 0;
+        lastDrawHeight = 0;
+        transitionLogging = false;
         lastDrawArea.setEmpty();
         visibleArea.setEmpty();
         stableArea.setEmpty();
@@ -381,6 +392,13 @@ public final class BoardScreen extends Screen {
 
     private void releaseSurface() {
         handler.removeCallbacks(lyricsTick);
+        android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
+        frameScheduled = false;
+        board.cancelLayoutTransition();
+        lastMode = null;
+        lastDrawWidth = 0;
+        lastDrawHeight = 0;
+        transitionLogging = false;
         surface = null;
         container = null;
         lastDrawArea.setEmpty();
@@ -424,6 +442,8 @@ public final class BoardScreen extends Screen {
         if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
             drawArea.set(bounds);
         }
+        boolean originChanged = !lastDrawArea.isEmpty()
+                && (drawArea.left != lastDrawArea.left || drawArea.top != lastDrawArea.top);
         lastDrawArea.set(drawArea);
 
         int drawWidth = drawArea.width();
@@ -440,7 +460,14 @@ public final class BoardScreen extends Screen {
             CarDiagnostics.log(getCarContext(), "Night mode=" + night);
             lastNight = night;
         }
-        if (!mode.equals(lastMode) || drawWidth != lastDrawWidth || drawHeight != lastDrawHeight) {
+        boolean freshSurface = lastMode == null;
+        boolean geometryChanged = !mode.equals(lastMode)
+                || drawWidth != lastDrawWidth || drawHeight != lastDrawHeight
+                || originChanged;
+        if (geometryChanged) {
+            if (lastMode != null) {
+                board.prepareLayoutTransition();
+            }
             CarDiagnostics.log(getCarContext(), "Layout mode=" + mode + " draw=" + drawWidth + "x" + drawHeight);
             lastMode = mode;
             lastDrawWidth = drawWidth;
@@ -462,8 +489,20 @@ public final class BoardScreen extends Screen {
         board.setFrame(width, height, drawArea.left, drawArea.top);
         board.measure(measuredWidth, measuredHeight);
         board.layout(0, 0, drawArea.width(), drawArea.height());
+        if (freshSurface) {
+            board.cancelLayoutTransition();
+        }
 
         scheduleFrame();
+        boolean transitioningFrame = board.isTransitioning();
+        if (transitioningFrame && !transitionLogging) {
+            transitionLogging = true;
+            transitionFrameTotalNanos = 0;
+            transitionFrameCount = 0;
+            CarDiagnostics.log(getCarContext(), "Board transition start mode=" + mode
+                    + " draw=" + drawWidth + "x" + drawHeight);
+        }
+        long frameStarted = android.os.SystemClock.elapsedRealtimeNanos();
         Surface drawingSurface = surface;
         Canvas canvas = null;
         boolean drawn = false;
@@ -489,6 +528,17 @@ public final class BoardScreen extends Screen {
                     drawingSurface.unlockCanvasAndPost(canvas);
                     if (drawn) {
                         consecutiveFailures = 0;
+                        if (transitionLogging) {
+                            transitionFrameTotalNanos += android.os.SystemClock.elapsedRealtimeNanos()
+                                    - frameStarted;
+                            transitionFrameCount++;
+                            if (!board.isTransitioning()) {
+                                CarDiagnostics.log(getCarContext(), "Board transition end avg frame="
+                                        + (transitionFrameTotalNanos / Math.max(1, transitionFrameCount)
+                                        / 1_000_000f) + "ms frames=" + transitionFrameCount);
+                                transitionLogging = false;
+                            }
+                        }
                     }
                 } catch (RuntimeException e) {
                     drawFailed(e);

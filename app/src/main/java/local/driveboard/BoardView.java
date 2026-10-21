@@ -83,6 +83,17 @@ public final class BoardView extends View {
     private long lyricTransitionAt;
     private LyricBlock currentLyricBlock;
     private LyricBlock outgoingLyricBlock;
+    private final Map<String, BoardTransition.Rect> transitionFrom = new HashMap<>();
+    private final Map<String, Float> transitionStartAlpha = new HashMap<>();
+    private final Map<String, Bitmap> transitionSource = new HashMap<>();
+    private final Map<String, Integer> transitionGlassAlphas = new HashMap<>();
+    private final Map<String, Integer> lastCardGlassAlphas = new HashMap<>();
+    private Path cookieTemplate;
+    private Bitmap artworkTile;
+    private Bitmap artworkTileSource;
+    private long transitionStartedAt;
+    private boolean transitionPending;
+    private String renderingCardType;
 
     private static final class LyricBlock {
         final LyricsDocument document;
@@ -115,7 +126,7 @@ public final class BoardView extends View {
                 || frameRequestHook != null) {
             return;
         }
-        if (isMediaPlaying()) {
+        if (isMediaPlaying() && !isTransitioning()) {
             long spacing = reducedFrameRate ? 65_000_000L : 32_000_000L;
             if (lastRenderedFrameNanos > 0
                     && frameTimeNanos - lastRenderedFrameNanos < spacing) {
@@ -154,6 +165,7 @@ public final class BoardView extends View {
         if (lyricsVisible == value) {
             return;
         }
+        cancelLayoutTransition();
         lyricsVisible = value;
         displayedLyric = Integer.MIN_VALUE;
         clearLyricBlocks();
@@ -233,7 +245,7 @@ public final class BoardView extends View {
             return;
         }
         frameScheduled = true;
-        if (isMediaPlaying()) {
+        if (isMediaPlaying() || isTransitioning()) {
             Choreographer.getInstance().postFrameCallback(frameCallback);
         } else {
             Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, 1000);
@@ -253,9 +265,15 @@ public final class BoardView extends View {
         lastRenderedFrameNanos = 0;
         slowFrames = 0;
         reducedFrameRate = false;
+        cancelLayoutTransition();
         if (staticLayer != null) {
             staticLayer.recycle();
             staticLayer = null;
+        }
+        if (artworkTile != null) {
+            artworkTile.recycle();
+            artworkTile = null;
+            artworkTileSource = null;
         }
         super.onDetachedFromWindow();
     }
@@ -271,6 +289,10 @@ public final class BoardView extends View {
     @Override
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
+        if (oldWidth > 0 && oldHeight > 0 && !transitionPending
+                && (width != oldWidth || height != oldHeight)) {
+            prepareLayoutTransition(oldWidth, oldHeight);
+        }
         clearLyricBlocks();
         invalidateStatic();
     }
@@ -284,7 +306,7 @@ public final class BoardView extends View {
             return true;
         }
         for (BoardLayout.Card card : layout.cards) {
-            if ("media".equals(card.type) && bounds(card).contains(x, y)) {
+            if ("media".equals(card.type) && visualBounds(card).contains(x, y)) {
                 return true;
             }
         }
@@ -294,6 +316,9 @@ public final class BoardView extends View {
     public void setMode(String value) {
         String next = Store.SPLIT.equals(value) ? Store.SPLIT : Store.FULL;
         if (!next.equals(mode)) {
+            if (!transitionPending) {
+                prepareLayoutTransition(getWidth(), getHeight());
+            }
             mode = next;
             dragging = null;
             refresh();
@@ -337,6 +362,166 @@ public final class BoardView extends View {
                 e + (c.row + c.h) * ch - gap / 2f);
     }
 
+    public boolean isTransitioning() {
+        return transitionPending || transitionStartedAt != 0;
+    }
+
+    /** Capture the currently displayed positions before a mode or drawing-area change. */
+    public void prepareLayoutTransition() {
+        prepareLayoutTransition(getWidth(), getHeight());
+    }
+
+    private void prepareLayoutTransition(int oldWidth, int oldHeight) {
+        if (oldWidth <= 0 || oldHeight <= 0 || lyricsVisible || editing) {
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        Map<String, BoardTransition.Rect> positions = new HashMap<>();
+        Map<String, Bitmap> sources = new HashMap<>();
+        Map<String, Float> alphas = new HashMap<>();
+        float previousElapsed = transitionStartedAt == 0 ? 0f
+                : Math.min(1f, (now - transitionStartedAt)
+                / (float) BoardTransition.DURATION_MS);
+        float previousProgress = transitionPending ? 0f
+                : BoardTransition.progress(now - transitionStartedAt);
+        for (BoardLayout.Card card : layout.cards) {
+            RectF visible = captureBounds(card, oldWidth, oldHeight, now);
+            positions.put(card.type, new BoardTransition.Rect(visible.left + frameX,
+                    visible.top + frameY, visible.right + frameX, visible.bottom + frameY));
+            Float previousAlpha = transitionStartAlpha.get(card.type);
+            alphas.put(card.type, !isTransitioning() ? 1f
+                    : previousAlpha == null ? BoardTransition.incomingAlpha(previousProgress)
+                    : previousAlpha + (1f - previousAlpha) * previousProgress);
+            Bitmap bitmap = null;
+            if (isTransitioning()) {
+                bitmap = renderCardBitmap(card, visible);
+            }
+            if (bitmap == null) {
+                bitmap = transitionSource.get(card.type);
+            }
+            if (bitmap == null && staticLayer != null && !staticLayer.isRecycled()) {
+                RectF old = bounds(card, oldWidth, oldHeight);
+                int left = Math.max(0, Math.min(staticLayer.getWidth() - 1, (int) old.left));
+                int top = Math.max(0, Math.min(staticLayer.getHeight() - 1, (int) old.top));
+                int right = Math.min(staticLayer.getWidth(), Math.max(left + 1, (int) Math.ceil(old.right)));
+                int bottom = Math.min(staticLayer.getHeight(), Math.max(top + 1, (int) Math.ceil(old.bottom)));
+                bitmap = Bitmap.createBitmap(staticLayer, left, top, right - left, bottom - top);
+            }
+            if (bitmap != null) {
+                sources.put(card.type, bitmap);
+            }
+        }
+        for (Map.Entry<String, BoardTransition.Rect> entry : transitionFrom.entrySet()) {
+            if (positions.containsKey(entry.getKey())) {
+                continue;
+            }
+            Bitmap bitmap = transitionSource.get(entry.getKey());
+            if (bitmap != null && !bitmap.isRecycled()) {
+                positions.put(entry.getKey(), entry.getValue());
+                sources.put(entry.getKey(), bitmap);
+                Float previousAlpha = transitionStartAlpha.get(entry.getKey());
+                alphas.put(entry.getKey(), (previousAlpha == null ? 1f : previousAlpha)
+                        * BoardTransition.outgoingAlpha(previousElapsed));
+            }
+        }
+        transitionFrom.clear();
+        transitionFrom.putAll(positions);
+        transitionStartAlpha.clear();
+        transitionStartAlpha.putAll(alphas);
+        transitionSource.clear();
+        transitionSource.putAll(sources);
+        transitionGlassAlphas.putAll(lastCardGlassAlphas);
+        transitionStartedAt = 0;
+        transitionPending = !transitionFrom.isEmpty();
+        invalidate();
+        if (frameScheduled && frameRequestHook == null) {
+            Choreographer.getInstance().removeFrameCallback(frameCallback);
+            frameScheduled = false;
+        }
+        scheduleFrame();
+        if (frameRequestHook != null) {
+            frameRequestHook.run();
+        }
+    }
+
+    public void cancelLayoutTransition() {
+        transitionPending = false;
+        transitionStartedAt = 0;
+        transitionFrom.clear();
+        transitionStartAlpha.clear();
+        transitionSource.clear();
+        transitionGlassAlphas.clear();
+        glassAlphas.clear();
+        invalidateStatic();
+    }
+
+    private RectF bounds(BoardLayout.Card card, int width, int height) {
+        float unit = Math.max(.25f, Math.min(width / 390f, height / 150f));
+        float edge = Math.max(2f, 8f * unit);
+        float cellWidth = (width - 2 * edge) / 12f;
+        float cellHeight = (height - 2 * edge) / 6f;
+        float gap = width * .015f;
+        return new RectF(edge + card.col * cellWidth + gap / 2f,
+                edge + card.row * cellHeight + gap / 2f,
+                edge + (card.col + card.w) * cellWidth - gap / 2f,
+                edge + (card.row + card.h) * cellHeight - gap / 2f);
+    }
+
+    private RectF visualBounds(BoardLayout.Card card) {
+        return visualBounds(card, SystemClock.uptimeMillis());
+    }
+
+    private RectF captureBounds(BoardLayout.Card card, int oldWidth, int oldHeight, long now) {
+        RectF target = bounds(card, oldWidth, oldHeight);
+        if (!isTransitioning()) {
+            return target;
+        }
+        float progress = transitionPending ? 0f
+                : BoardTransition.progress(now - transitionStartedAt);
+        BoardTransition.Rect from = transitionFrom.get(card.type);
+        if (from == null) {
+            BoardTransition.Rect scaled = new BoardTransition.Rect(target.left, target.top,
+                    target.right, target.bottom).scale(.92f + .08f * progress);
+            return new RectF(scaled.left, scaled.top, scaled.right, scaled.bottom);
+        }
+        BoardTransition.Rect destination = new BoardTransition.Rect(target.left + frameX,
+                target.top + frameY, target.right + frameX, target.bottom + frameY);
+        BoardTransition.Rect current = BoardTransition.Rect.interpolate(from, destination, progress)
+                .offset(-frameX, -frameY);
+        return new RectF(current.left, current.top, current.right, current.bottom);
+    }
+
+    private RectF visualBounds(BoardLayout.Card card, long now) {
+        RectF target = bounds(card);
+        BoardTransition.Rect from = transitionFrom.get(card.type);
+        if (!isTransitioning()) {
+            return target;
+        }
+        float progress = transitionPending ? 0f
+                : BoardTransition.progress(now - transitionStartedAt);
+        if (from == null) {
+            BoardTransition.Rect scaled = new BoardTransition.Rect(target.left, target.top,
+                    target.right, target.bottom).scale(.92f + .08f * progress);
+            return new RectF(scaled.left, scaled.top, scaled.right, scaled.bottom);
+        }
+        BoardTransition.Rect destination = new BoardTransition.Rect(target.left + frameX,
+                target.top + frameY, target.right + frameX, target.bottom + frameY);
+        BoardTransition.Rect current = BoardTransition.Rect.interpolate(from, destination, progress)
+                .offset(-frameX, -frameY);
+        return new RectF(current.left, current.top, current.right, current.bottom);
+    }
+
+    private float transitionAlpha(String type, long now) {
+        if (!isTransitioning()) {
+            return 1f;
+        }
+        float progress = transitionPending ? 0f
+                : BoardTransition.progress(now - transitionStartedAt);
+        Float initial = transitionStartAlpha.get(type);
+        return initial == null ? BoardTransition.incomingAlpha(progress)
+                : initial + (1f - initial) * progress;
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -347,6 +532,11 @@ public final class BoardView extends View {
             return;
         }
         long now = SystemClock.uptimeMillis();
+        if (isTransitioning()) {
+            drawTransition(canvas, now);
+            recordDrawTime(drawStarted);
+            return;
+        }
         if (staticLayer == null || staticLayer.isRecycled()
                 || staticLayer.getWidth() != width || staticLayer.getHeight() != height) {
             if (staticLayer != null && !staticLayer.isRecycled()) {
@@ -374,6 +564,10 @@ public final class BoardView extends View {
         } else {
             drawProgress(canvas);
         }
+        recordDrawTime(drawStarted);
+    }
+
+    private void recordDrawTime(long drawStarted) {
         long drawMs = SystemClock.uptimeMillis() - drawStarted;
         slowFrames = drawMs > 33 ? slowFrames + 1 : 0;
         if (slowFrames >= 3) {
@@ -419,40 +613,145 @@ public final class BoardView extends View {
             if (r.width() <= 0 || r.height() <= 0) {
                 continue;
             }
-            canvas.save();
-            drawCardSurface(canvas, c.type, r);
-            canvas.clipPath(cardPath(c.type, r));
-            float pad = Math.max(4.5f * unit(),
-                    Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
-            if ("media".equals(c.type)) {
-                pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
-            } else if ("prayer".equals(c.type)) {
-                pad = Math.max(7f * unit(),
-                        Math.min(22f * unit(), Math.min(r.width(), r.height()) * .18f));
-            }
-            RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
-            if ("clock".equals(c.type)) {
-                drawClock(canvas, content);
-            } else if ("prayer".equals(c.type)) {
-                drawPrayer(canvas, content, c.h);
-            } else if ("media".equals(c.type)) {
-                drawMedia(canvas, content);
-            } else if ("battery".equals(c.type)) {
-                float aspect = r.width() / r.height();
-                if (aspect > .75f && aspect < 1.4f) {
-                    // Keep text inside the circle's inscribed square, with padding.
-                    float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8);
-                    half *= .90f;
-                    content = new RectF(r.centerX() - half, r.centerY() - half,
-                            r.centerX() + half, r.centerY() + half);
-                }
-                drawBattery(canvas, content);
-            }
-            if (editing) {
-                drawHandle(canvas, r);
-            }
-            canvas.restore();
+            drawCard(canvas, c, r);
         }
+    }
+
+    private void drawCard(Canvas canvas, BoardLayout.Card c, RectF r) {
+        canvas.save();
+        renderingCardType = c.type;
+        drawCardSurface(canvas, c.type, r);
+        canvas.clipPath(cardPath(c.type, r));
+        float pad = Math.max(4.5f * unit(),
+                Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
+        if ("media".equals(c.type)) {
+            pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
+        } else if ("prayer".equals(c.type)) {
+            pad = Math.max(7f * unit(),
+                    Math.min(22f * unit(), Math.min(r.width(), r.height()) * .18f));
+        }
+        RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
+        if ("clock".equals(c.type)) {
+            drawClock(canvas, content);
+        } else if ("prayer".equals(c.type)) {
+            drawPrayer(canvas, content, c.h);
+        } else if ("media".equals(c.type)) {
+            drawMedia(canvas, content);
+        } else if ("battery".equals(c.type)) {
+            float aspect = r.width() / r.height();
+            if (aspect > .75f && aspect < 1.4f) {
+                // Keep text inside the circle's inscribed square, with padding.
+                float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8);
+                half *= .90f;
+                content = new RectF(r.centerX() - half, r.centerY() - half,
+                        r.centerX() + half, r.centerY() + half);
+            }
+            drawBattery(canvas, content);
+        }
+        if (editing) {
+            drawHandle(canvas, r);
+        }
+        canvas.restore();
+        renderingCardType = null;
+    }
+
+    private void drawTransition(Canvas canvas, long now) {
+        if (transitionPending) {
+            transitionStartedAt = now;
+            transitionPending = false;
+        }
+        float progress = BoardTransition.progress(now - transitionStartedAt);
+        if (progress >= 1f) {
+            transitionStartedAt = 0;
+            transitionFrom.clear();
+            transitionStartAlpha.clear();
+            transitionSource.clear();
+            transitionGlassAlphas.clear();
+            glassAlphas.clear();
+            staticDirty = true;
+            drawStatic(canvas);
+            drawProgress(canvas);
+            return;
+        }
+        if (colours == null) {
+            colours = BoardColours.current(getContext(), media == null ? null : media.art);
+        }
+        CREAM = colours.onSurface;
+        SAGE = colours.onSurfaceVariant;
+        BRASS = colours.primary;
+        SOFT = colours.onSurface;
+        DIM = colours.onSurfaceVariant;
+        glassBackdrop = GlassBackdrop.get(background, frameWidth(), frameHeight(), this);
+        if (!externalBackground) {
+            drawFrameBackground(canvas, frame());
+        }
+        for (Map.Entry<String, BoardTransition.Rect> entry : transitionFrom.entrySet()) {
+            if (findCard(entry.getKey()) != null) {
+                continue;
+            }
+            Bitmap bitmap = transitionSource.get(entry.getKey());
+            if (bitmap != null && !bitmap.isRecycled()) {
+                BoardTransition.Rect absolute = entry.getValue();
+                RectF rect = new RectF(absolute.left - frameX, absolute.top - frameY,
+                        absolute.right - frameX, absolute.bottom - frameY);
+                drawTransitionBitmap(canvas, entry.getKey(), bitmap, rect,
+                        transitionStartAlpha.get(entry.getKey())
+                                * BoardTransition.outgoingAlpha(Math.min(1f,
+                                (now - transitionStartedAt) / (float) BoardTransition.DURATION_MS)));
+            }
+        }
+        for (BoardLayout.Card card : layout.cards) {
+            RectF current = visualBounds(card, now);
+            float alpha = transitionAlpha(card.type, now);
+            if (alpha > 0f && current.width() > 0f && current.height() > 0f) {
+                int save = canvas.save();
+                if (alpha < 1f) {
+                    canvas.saveLayerAlpha(current, Math.round(alpha * 255f));
+                }
+                drawCard(canvas, card, current);
+                if (alpha < 1f) {
+                    canvas.restore();
+                }
+                canvas.restoreToCount(save);
+            }
+        }
+        drawProgress(canvas);
+    }
+
+    private BoardLayout.Card findCard(String type) {
+        for (BoardLayout.Card card : layout.cards) {
+            if (type.equals(card.type)) {
+                return card;
+            }
+        }
+        return null;
+    }
+
+    private Bitmap renderCardBitmap(BoardLayout.Card card, RectF rect) {
+        int width = Math.max(1, (int) Math.ceil(rect.width()));
+        int height = Math.max(1, (int) Math.ceil(rect.height()));
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        canvas.translate(-rect.left, -rect.top);
+        drawCard(canvas, card, rect);
+        return bitmap;
+    }
+
+    private void drawTransitionBitmap(Canvas canvas, String type, Bitmap bitmap,
+            RectF rect, float alpha) {
+        if (alpha <= 0f || rect.width() <= 0f || rect.height() <= 0f) {
+            return;
+        }
+        int save = canvas.save();
+        canvas.clipPath(cardPath(type, rect));
+        paint.setShader(null);
+        paint.setColor(0xFFFFFFFF);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setFilterBitmap(true);
+        paint.setAlpha(Math.max(0, Math.min(255, Math.round(alpha * 255f))));
+        canvas.drawBitmap(bitmap, null, rect, paint);
+        paint.setAlpha(255);
+        canvas.restoreToCount(save);
     }
 
     /**
@@ -582,6 +881,21 @@ public final class BoardView extends View {
     }
 
     private int glassAlpha(Path shape, RectF bounds, int tint) {
+        if (isTransitioning() && renderingCardType != null) {
+            Integer held = transitionGlassAlphas.get(renderingCardType);
+            if (held != null) {
+                lastCardGlassAlphas.put(renderingCardType, held);
+                return held;
+            }
+            Path inFrame = new Path(shape);
+            inFrame.offset(frameX, frameY);
+            double backdrop = GlassBackdrop.percentile90(background,
+                    frameWidth(), frameHeight(), inFrame);
+            int alpha = colours.alphaForBackdrop(tint, backdrop);
+            transitionGlassAlphas.put(renderingCardType, alpha);
+            lastCardGlassAlphas.put(renderingCardType, alpha);
+            return alpha;
+        }
         String key = System.identityHashCode(background) + ":" + frameWidth() + "x" + frameHeight()
                 + "@" + frameX + "," + frameY
                 + ":" + layout.toJson() + ":" + tint + ":" + colours.onSurface + ":"
@@ -589,6 +903,9 @@ public final class BoardView extends View {
                 + bounds.right + "," + bounds.bottom;
         Integer cached = glassAlphas.get(key);
         if (cached != null) {
+            if (renderingCardType != null) {
+                lastCardGlassAlphas.put(renderingCardType, cached);
+            }
             return cached;
         }
         Path inFrame = new Path(shape);
@@ -599,6 +916,9 @@ public final class BoardView extends View {
             glassAlphas.clear();
         }
         glassAlphas.put(key, alpha);
+        if (renderingCardType != null) {
+            lastCardGlassAlphas.put(renderingCardType, alpha);
+        }
         return alpha;
     }
 
@@ -1024,12 +1344,55 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
+    private Path cookiePath(RectF bounds) {
+        if (cookieTemplate == null) {
+            cookieTemplate = ExpressiveShapes.cookie(new RectF(0f, 0f, 100f, 100f));
+        }
+        Matrix transform = new Matrix();
+        transform.setScale(bounds.width() / 100f, bounds.height() / 100f);
+        transform.postTranslate(bounds.left, bounds.top);
+        Path result = new Path();
+        cookieTemplate.transform(transform, result);
+        return result;
+    }
+
+    private Bitmap artworkTile(Bitmap art) {
+        if (artworkTile != null && !artworkTile.isRecycled()
+                && artworkTileSource == art) {
+            return artworkTile;
+        }
+        if (artworkTile != null && !artworkTile.isRecycled()) {
+            artworkTile.recycle();
+        }
+        final int size = 384;
+        artworkTile = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        artworkTileSource = art;
+        Canvas tileCanvas = new Canvas(artworkTile);
+        RectF square = new RectF(0f, 0f, size, size);
+        Path shape = cookiePath(square);
+        BitmapShader shader = new BitmapShader(art,
+                Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        float scale = Math.max(size / (float) art.getWidth(), size / (float) art.getHeight());
+        Matrix matrix = new Matrix();
+        matrix.setScale(scale, scale);
+        matrix.postTranslate((size - art.getWidth() * scale) / 2f,
+                (size - art.getHeight() * scale) / 2f);
+        shader.setLocalMatrix(matrix);
+        paint.setColor(0xFFFFFFFF);
+        paint.setAlpha(255);
+        paint.setShader(shader);
+        paint.setStyle(Paint.Style.FILL);
+        tileCanvas.drawPath(shape, paint);
+        paint.setShader(null);
+        return artworkTile;
+    }
+
     private void drawMedia(Canvas canvas, RectF r) {
         float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
         float artworkTop = r.centerY() - artworkSize / 2f;
         RectF artwork = new RectF(r.left, artworkTop,
                 r.left + artworkSize, artworkTop + artworkSize);
-        Path artShape = ExpressiveShapes.cookie(artwork);
+        Path artShape = cookiePath(artwork);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFF000000);
         paint.setShadowLayer(artworkSize * .06f, 0,
@@ -1037,20 +1400,11 @@ public final class BoardView extends View {
         canvas.drawPath(artShape, paint);
         paint.clearShadowLayer();
         if (media != null && media.art != null && !media.art.isRecycled()) {
-            Bitmap art = media.art;
-            BitmapShader shader = new BitmapShader(art,
-                    Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            float scale = Math.max(artwork.width() / art.getWidth(),
-                    artwork.height() / art.getHeight());
-            Matrix matrix = new Matrix();
-            matrix.setScale(scale, scale);
-            matrix.postTranslate(artwork.centerX() - art.getWidth() * scale / 2f,
-                    artwork.centerY() - art.getHeight() * scale / 2f);
-            shader.setLocalMatrix(matrix);
-            paint.setColor(0xFFFFFFFF);
-            paint.setShader(shader);
-            canvas.drawPath(artShape, paint);
             paint.setShader(null);
+            paint.setColor(0xFFFFFFFF);
+            paint.setAlpha(255);
+            paint.setFilterBitmap(true);
+            canvas.drawBitmap(artworkTile(media.art), null, artwork, paint);
         } else {
             paint.setColor(colours.surfaceContainerHighest);
             canvas.drawPath(artShape, paint);
@@ -1116,7 +1470,7 @@ public final class BoardView extends View {
             if (!"media".equals(card.type)) {
                 continue;
             }
-            RectF bounds = bounds(card);
+            RectF bounds = visualBounds(card);
             float pad = Math.max(2f * unit(),
                     Math.min(bounds.width(), bounds.height()) * .08f);
             RectF r = new RectF(bounds.left + pad, bounds.top + pad,
@@ -1128,6 +1482,10 @@ public final class BoardView extends View {
                     (float) media.estimatedPositionMs() / media.duration));
             float lineY = r.bottom - 3f * unit();
             canvas.save();
+            float alpha = transitionAlpha(card.type, SystemClock.uptimeMillis());
+            if (alpha < 1f) {
+                canvas.saveLayerAlpha(bounds, Math.round(alpha * 255f));
+            }
             canvas.clipPath(cardPath(card.type, bounds));
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(1.5f, r.height() * .015f));
@@ -1151,6 +1509,9 @@ public final class BoardView extends View {
             wave.lineTo(end, lineY);
             canvas.drawPath(wave, paint);
             paint.setStyle(Paint.Style.FILL);
+            if (alpha < 1f) {
+                canvas.restore();
+            }
             canvas.restore();
         }
     }
