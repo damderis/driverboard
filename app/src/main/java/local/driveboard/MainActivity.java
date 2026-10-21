@@ -216,7 +216,12 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         carThumbnail.setScaleType(ImageView.ScaleType.FIT_CENTER);
         carThumbnail.setContentDescription(getString(R.string.my_car));
         car.addView(carThumbnail, new LinearLayout.LayoutParams(dp(72), dp(48)));
-        Button choose = pill(getString(R.string.choose_picture));
+        TextView choose = text(getString(R.string.choose_picture), 12, true);
+        choose.setTextColor(accent);
+        choose.setGravity(Gravity.CENTER);
+        choose.setMinHeight(dp(48));
+        choose.setMinWidth(dp(48));
+        choose.setPadding(dp(12), 0, dp(12), 0);
         choose.setOnClickListener(view -> chooseCarPicture());
         car.addView(choose);
         car.setOnClickListener(view -> {

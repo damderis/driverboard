@@ -270,8 +270,9 @@ public final class BoardView extends View {
             paint.setTypeface(Fonts.semibold(getContext()));
             paint.setTextSize(countSize);
             float suffixX = x + paint.measureText(displayCountdown + "  ");
+            float zoneSize = Math.min(11f * unit(), r.height() * .42f);
             if (suffixX < r.right - 8f * unit()) {
-                text(canvas, "\u00b7 " + prayer.zoneCode, suffixX, countdownY, countSize,
+                text(canvas, "\u00b7 " + prayer.zoneCode, suffixX, countdownY, zoneSize,
                         SAGE, Fonts.semibold(getContext()), r.right - suffixX);
             }
         }
@@ -356,11 +357,21 @@ public final class BoardView extends View {
                         Math.round(battery.rangeMeters / 1000f))
                 : valid ? DASH : words.getString(R.string.board_no_car_data);
         float secondary = Math.min(16f * unit(), r.height() * .20f);
-        float lineY = stale ? r.bottom - secondary * 1.05f
-                : r.bottom - Math.max(1f * unit(), secondary * .10f);
+        float size = fit(percent, Math.min(32f * unit(), r.height() * .40f),
+                r.width(), Fonts.extraBold(getContext()));
+        float blockHeight = size + secondary * 1.3f;
+        float y = r.top + (r.height() - blockHeight) / 2f + size;
+        float rangeY = stale ? Math.min(r.bottom - secondary, y + secondary * 1.2f)
+                : Math.min(r.bottom, y + secondary * 1.3f);
         if (carRender != null) {
-            RectF imageBounds = new RectF(r.left, r.top, r.right,
-                    Math.max(r.top, lineY - secondary * 1.25f));
+            float imageBottom = y - size;
+            float photoHeight = Math.max(0f, imageBottom - r.top);
+            if (photoHeight < r.height() * .35f) {
+                carRender = null;
+            }
+        }
+        if (carRender != null) {
+            RectF imageBounds = new RectF(r.left, r.top, r.right, y - size);
             float scale = Math.min(imageBounds.width() / carRender.getWidth(),
                     imageBounds.height() / carRender.getHeight());
             float imageWidth = carRender.getWidth() * scale;
@@ -372,9 +383,10 @@ public final class BoardView extends View {
                     centerY + imageHeight / 2f);
             paint.setAlpha(255);
             canvas.drawBitmap(carRender, null, destination, paint);
-            String line = percent + "  \u00b7  " + range;
-            text(canvas, line, r.left, lineY,
-                    fit(line, secondary, r.width(), Fonts.regular(getContext())),
+            text(canvas, percent, r.left, y, size, stale ? DIM : CREAM,
+                    Fonts.extraBold(getContext()), r.width());
+            text(canvas, range, r.left, rangeY,
+                    fit(range, secondary, r.width(), Fonts.regular(getContext())),
                     stale ? DIM : SOFT, Fonts.regular(getContext()), r.width());
             if (stale && battery.updated != null && !battery.updated.isEmpty()) {
                 String updated = words.getString(R.string.board_updated, battery.updated);
@@ -385,14 +397,8 @@ public final class BoardView extends View {
             }
             return;
         }
-        float size = fit(percent, Math.min(32f * unit(), r.height() * .40f),
-                r.width(), Fonts.extraBold(getContext()));
-        float blockHeight = size + secondary * 1.3f;
-        float y = r.top + (r.height() - blockHeight) / 2f + size;
         text(canvas, percent, r.left, y, size, stale ? DIM : CREAM,
                 Fonts.extraBold(getContext()), r.width());
-        float rangeY = stale ? Math.min(r.bottom - secondary, y + secondary * 1.2f)
-                : Math.min(r.bottom, y + secondary * 1.3f);
         text(canvas, range, r.left, rangeY,
                 fit(range, secondary, r.width(), Fonts.regular(getContext())),
                 stale ? DIM : SOFT,
