@@ -28,7 +28,7 @@ Personal, not a product for sale. It is tuned to one car (Proton e.MAS head unit
 - Languages: English and Bahasa Melayu, with a setting. Prayer names stay in their Malay form (Subuh, Zohor, Asar, Maghrib, Isyak) in both.
 
 ## Brand Commitments
-Name: DriveBoard. No logo or palette committed yet.
+Name: DriveBoard. Visual language pinned by the owner: Material 3 Expressive (2026-10-21).
 
 ## Evidence on Hand
 No user data beyond the owner's own phone. Do not invent features, car data or screenshots that have not been seen on the real car.

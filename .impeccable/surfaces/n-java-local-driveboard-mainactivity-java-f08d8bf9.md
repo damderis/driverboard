@@ -7,29 +7,26 @@ related_targets: ["app/src/main/java/local/driveboard/BoardView.java","app/src/m
 
 # DriveBoard surfaces: phone editor + Android Auto car board
 
-Scope: the phone editor (MainActivity) and the car board (BoardView drawn by BoardScreen). Mode: Operate. Build path: code-led. Chosen sketch: .impeccable/mocks/decision/safer-masjid.html.
+Scope: the phone editor (MainActivity) and the car board (BoardView drawn by BoardScreen), plus the car lyrics view. Mode: Operate. Build path: code-led.
 
-Audience and job: the owner, parked, arranges widgets and settings on the phone; while driving, glances at the car screen for time, next prayer, now playing, battery.
+Audience and job: the owner, parked, arranges widgets and settings on the phone; while driving, glances at the car screen for time, next prayer, now playing, battery; taps now playing for lyrics.
+
+History: Masjid Stone & Teal (seed:84ca9e5bc0fa4afd) was built and rejected by the user on 2026-10-21 as cheap-looking. The user pinned Material 3 Expressive; a user-pinned direction beats the roll.
 
 ## Direction contract
 
-THESIS: Deep teal panels with brass details, like a Malaysian masjid interior; one eight-point star marks the next prayer and nothing else is ornamented. Refuses the category default of near-black tiles with a neon accent.
+THESIS: Google's Material 3 Expressive on the car: colour lifted from the song's album art or the wallpaper, every widget in its own expressive shape, confident flexible type. Refuses identical dark tiles with one accent.
 
-OWN-WORLD: Car board: teal #0F3D3E ground, #16494A panels, cream #F4EFE4 type, sage #A9C2BD labels, brass #C8A55A for the next prayer and its countdown only. Phone: limestone #EDE6DA ground, #FAF7F1 list card, ink #1D2423, muted #5F6763, hairline #E3DCCF, filled teal pill buttons; dark mode swaps to the car palette. Type: Atkinson Hyperlegible Next, bundled; tabular numerals. The star is two overlapping squares stroked in brass.
+OWN-WORLD: M3 tonal dark scheme from a seed (wallpaper by default, album art, or presets); containers in distinct roles (surfaceContainerHigh, primaryContainer, secondaryContainer, tertiaryContainer); shapes from the M3 shape library: large rounded squares, pill-ended prayer bar, cookie-clipped album art, a rounded eight-point burst marking the next prayer; Google Sans Flex or Roboto Flex with variable weight and width; the M3 wavy progress line.
 
-STORY: The driver reads the next prayer and its countdown in one glance, knows what is playing and how much battery is left, and trusts that "—" means missing data, never a guess.
+STORY: One glance tells the time, the next prayer and how long until it, what is playing (with its art), and battery; "—" means missing. Tapping the song opens synced lyrics.
 
-FIRST VIEWPORT: Phone: title "DriveBoard" in teal; the board preview at the car's aspect ratio, full width; one hint line; a single settings card of 60dp rows: Prayer zone with a "Use location" button, Now playing access, Car battery status, Language EN/BM. Car: clock at left spanning full height, star plus "Zohor 13:01" plus brass countdown top right, now playing and battery below.
+FIRST VIEWPORT: Car (16:9): clock container left at full height; pill-ended prayer bar across the top right with the burst, name, time and countdown, five-prayer row beneath; now-playing container with large cookie art, two-line title, artist and wavy progress; battery container. Phone: M3 Expressive top app bar, the board preview, M3 settings list.
 
-FORM: Masjid Stone & Teal, grounded candidate 3 of the safer re-roll (seed:84ca9e5bc0fa4afd).
+FORM: user-pinned Material 3 Expressive (no roll). seed: none (unavailable)
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 ## Constraints
-- Native Android Views (Java), no Material Components library; system Back, edge-to-edge insets, 48dp touch targets, sp text sizes.
-- Car side draws with View.draw() onto the navigation surface; no touch while driving.
-- State vocabulary: live, stale (dimmed plus "updated HH:mm"), missing ("—"), needs permission, waiting (amber #8A6100 text).
-
-## Open decisions
-- Google Maps on the car board (shortcut vs. embedded map).
-- 3D car replica (needs a licensed model).
+- Car side draws with View.draw() onto the navigation surface; no animation while driving; Android Auto touch only for opening/closing lyrics.
+- Phone follows Material 3 (Expressive) components, system Back, edge-to-edge, 48dp targets.

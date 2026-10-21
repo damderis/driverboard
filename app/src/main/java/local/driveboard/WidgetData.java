@@ -4,6 +4,7 @@ import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -87,6 +88,74 @@ public final class WidgetData {
         NotificationManager m = c.getSystemService(NotificationManager.class);
         return m != null && m.isNotificationListenerAccessGranted(
                 new ComponentName(c, MediaAccessService.class));
+    }
+
+    public static final class MediaSnapshot {
+        public final String title;
+        public final String artist;
+        public final Bitmap art;
+        public final long duration;
+        public final long position;
+        public final long updatedAt;
+        public final float speed;
+        public final boolean playing;
+
+        public MediaSnapshot(String title, String artist, Bitmap art, long duration,
+                long position, long updatedAt, float speed, boolean playing) {
+            this.title = title;
+            this.artist = artist;
+            this.art = art;
+            this.duration = duration;
+            this.position = position;
+            this.updatedAt = updatedAt;
+            this.speed = speed;
+            this.playing = playing;
+        }
+    }
+
+    public static MediaSnapshot mediaSnapshot(Context c) {
+        Context lc = AppLocale.wrap(c);
+        if (!hasMediaAccess(c)) {
+            return new MediaSnapshot(lc.getString(R.string.media_grant_access),
+                    lc.getString(R.string.media_notification_required), null,
+                    0, 0, 0, 0, false);
+        }
+        if (hasMediaAccess(c)) {
+            try {
+                MediaSessionManager manager = c.getSystemService(MediaSessionManager.class);
+                for (MediaController controller : manager.getActiveSessions(
+                        new ComponentName(c, MediaAccessService.class))) {
+                    PlaybackState state = controller.getPlaybackState();
+                    if (state == null || state.getState() != PlaybackState.STATE_PLAYING) {
+                        continue;
+                    }
+                    MediaMetadata data = controller.getMetadata();
+                    if (data == null) {
+                        return new MediaSnapshot(lc.getString(R.string.media_playing),
+                                "\u2014", null, 0, state.getPosition(),
+                                state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), true);
+                    }
+                    Bitmap art = data.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+                    if (art == null) {
+                        art = data.getBitmap(MediaMetadata.METADATA_KEY_ART);
+                    }
+                    if (art == null) {
+                        art = data.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+                    }
+                    String title = nonempty(data.getString(MediaMetadata.METADATA_KEY_TITLE),
+                            data.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE));
+                    return new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
+                            nonempty(data.getString(MediaMetadata.METADATA_KEY_ARTIST), "\u2014"),
+                            art, data.getLong(MediaMetadata.METADATA_KEY_DURATION),
+                            state.getPosition(), state.getLastPositionUpdateTime(),
+                            state.getPlaybackSpeed(), true);
+                }
+            } catch (RuntimeException ignored) {
+                // Permission or the session may disappear during the snapshot.
+            }
+        }
+        return new MediaSnapshot(lc.getString(R.string.media_nothing_playing), "", null,
+                0, 0, 0, 0, false);
     }
 
     public static String[] media(Context c) {
