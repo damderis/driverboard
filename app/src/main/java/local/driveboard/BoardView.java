@@ -19,10 +19,6 @@ import android.view.MotionEvent;
 import android.view.View;
 
 import java.text.SimpleDateFormat;
-import java.time.Duration;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.Date;
 
 /** Shared proportional renderer for the phone preview and car surface. */
@@ -140,7 +136,7 @@ public final class BoardView extends View {
         words = AppLocale.wrap(getContext());
         Date now = new Date();
         time = android.text.format.DateFormat.getTimeFormat(words).format(now);
-        date = new SimpleDateFormat("EEE, d MMM", AppLocale.locale(getContext())).format(now);
+        date = new SimpleDateFormat("EEE d MMM", AppLocale.locale(getContext())).format(now);
         prayer = WidgetData.prayerSnapshot(words);
         battery = WidgetData.battery(words);
         media = WidgetData.mediaSnapshot(words);
@@ -218,6 +214,14 @@ public final class BoardView extends View {
             } else if ("media".equals(c.type)) {
                 drawMedia(canvas, content);
             } else if ("battery".equals(c.type)) {
+                float aspect = r.width() / r.height();
+                if (aspect > .75f && aspect < 1.4f) {
+                    // Keep text inside the circle's inscribed square, with padding.
+                    float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8);
+                    half *= .90f;
+                    content = new RectF(r.centerX() - half, r.centerY() - half,
+                            r.centerX() + half, r.centerY() + half);
+                }
                 drawBattery(canvas, content);
             }
             if (editing) {
@@ -488,7 +492,8 @@ public final class BoardView extends View {
     private void drawClock(Canvas canvas, RectF r) {
         Typeface clockFace = Fonts.medium(getContext());
         float size = fit(time, r.height() * .60f, r.width(), clockFace);
-        float dateSize = Math.min(18f * unit(), r.height() * .16f);
+        float dateSize = fit(date, Math.min(18f * unit(), r.height() * .16f),
+                r.width(), Fonts.regular(getContext()));
         paint.setTypeface(clockFace);
         paint.setTextSize(size);
         Paint.FontMetrics timeMetrics = paint.getFontMetrics();
@@ -518,8 +523,6 @@ public final class BoardView extends View {
             }
         }
         boolean stale = prayer != null && "stale".equals(prayer.status);
-        int imminentMinutes = minutesUntil(next);
-        boolean imminent = imminentMinutes >= 0 && imminentMinutes <= 15;
         float limit = gridRows >= 3 ? r.top + r.height() * .72f : r.bottom;
         float star = Math.min(28f * unit(), Math.max(10f * unit(), r.height() * .36f));
         star = Math.min(star, r.width() * .15f);
@@ -584,9 +587,7 @@ public final class BoardView extends View {
         if (countdown == null || countdown.isEmpty()) {
             countdown = DASH;
         }
-        String displayCountdown = imminent
-                ? words.getString(R.string.board_imminent_minutes, imminentMinutes)
-                : countdown;
+        String displayCountdown = countdown;
         float countdownY = Math.min(limit, titleY + countSize * 1.12f);
         text(canvas, displayCountdown, x, countdownY, countSize,
                 stale ? DIM : withAlpha(colours.onPrimaryContainer, .8f),
@@ -610,22 +611,28 @@ public final class BoardView extends View {
     private void drawPrayerRow(Canvas canvas, RectF r, WidgetData.PrayerRow[] rows) {
         float top = r.top + r.height() * .72f;
         float col = r.width() / 5f;
-        float nameSize = Math.min(10f * unit(), (r.bottom - top) * .37f);
-        float timeSize = Math.min(11f * unit(), (r.bottom - top) * .42f);
+        float height = r.bottom - top;
+        float timeSize = Math.min(11f * unit(), height / 2.6f);
+        float nameSize = timeSize * .82f;
+        paint.setTypeface(Fonts.medium(getContext()));
+        paint.setTextSize(nameSize);
+        Paint.FontMetrics nameMetrics = paint.getFontMetrics();
+        paint.setTypeface(Fonts.regular(getContext()));
+        paint.setTextSize(timeSize);
+        Paint.FontMetrics timeMetrics = paint.getFontMetrics();
+        float gap = timeSize * .28f;
+        float blockHeight = nameMetrics.descent - nameMetrics.ascent + gap
+                + timeMetrics.descent - timeMetrics.ascent;
+        float nameY = top + (height - blockHeight) / 2f - nameMetrics.ascent;
+        float timeY = nameY + nameMetrics.descent + gap - timeMetrics.ascent;
         for (int i = 0; i < 5; i++) {
             WidgetData.PrayerRow row = rows[i];
             float center = r.left + (i + .5f) * col;
             int color = row.past || (prayer != null && "stale".equals(prayer.status))
                     ? DIM : CREAM;
-            if (row.next) {
-                paint.setStyle(Paint.Style.FILL);
-                paint.setColor(BRASS);
-                canvas.drawCircle(center, top + (r.bottom - top) * .10f,
-                        (r.bottom - top) * .03f, paint);
-            }
-            centeredText(canvas, row.name, center, top + (r.bottom - top) * .58f,
+            centeredText(canvas, row.name, center, nameY,
                     nameSize, color, Fonts.medium(getContext()), col - 2f * unit());
-            centeredText(canvas, row.time, center, top + (r.bottom - top) * .91f,
+            centeredText(canvas, row.time, center, timeY,
                     timeSize, color, Fonts.regular(getContext()), col - 2f * unit());
         }
     }
@@ -640,18 +647,6 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
-    private int minutesUntil(WidgetData.PrayerRow next) {
-        if (next == null || prayer == null || !"live".equals(prayer.status)) {
-            return -1;
-        }
-        try {
-            LocalTime now = ZonedDateTime.now(ZoneId.of("Asia/Kuala_Lumpur")).toLocalTime();
-            long seconds = Duration.between(now, LocalTime.parse(next.time)).getSeconds();
-            return seconds < 0 || seconds > 15 * 60 ? -1 : (int) ((seconds + 59) / 60);
-        } catch (RuntimeException ignored) {
-            return -1;
-        }
-    }
     private void drawMedia(Canvas canvas, RectF r) {
         float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
         float artworkTop = r.centerY() - artworkSize / 2f;
@@ -714,7 +709,16 @@ public final class BoardView extends View {
         titlePaint.setTextSize(titleSize);
         Fonts.cardText(titlePaint);
         titlePaint.setColor(playing ? CREAM : SAGE);
-        StaticLayout titleLayout = stateLayout(title, titlePaint, width);
+        float widestWord = 0f;
+        for (String word : title.trim().split("\\s+")) {
+            widestWord = Math.max(widestWord, titlePaint.measureText(word));
+        }
+        if (widestWord > width) {
+            // Preserve ordinary song words before resorting to a mid-word break.
+            titlePaint.setTextSize(Math.max(titleSize * .82f, titleSize * width / widestWord));
+        }
+        StaticLayout titleLayout = stateLayout(wordWrappedTitle(title, titlePaint, width),
+                titlePaint, width);
         canvas.save();
         canvas.translate(x, textTop);
         titleLayout.draw(canvas);
@@ -762,53 +766,68 @@ public final class BoardView extends View {
     private void drawBattery(Canvas canvas, RectF r) {
         boolean stale = battery != null && "stale".equals(battery.status);
         boolean valid = battery != null && battery.percent >= 0;
-        String percent = valid ? Integer.toString(battery.percent) : DASH;
+        String value = valid ? battery.percent + "%" : DASH;
         String range = battery != null && battery.rangeMeters >= 0
                 ? words.getString(R.string.board_range_km,
                         Math.round(battery.rangeMeters / 1000f))
                 : valid ? DASH : words.getString(R.string.board_no_car_data);
         float secondary = Math.min(14f * unit(), r.height() * .18f);
-        float size = fit(percent, Math.min(valid ? 32f * unit() : 18f * unit(),
-                        r.height() * (valid ? .40f : .16f)),
-                r.width(), Fonts.regular(getContext()));
-        float blockHeight = size + secondary * 2.2f;
-        float y = r.top + (r.height() - blockHeight) / 2f + size;
-        float rangeTop = Math.min(r.bottom, y + secondary * .25f);
-        RectF rangeBounds = new RectF(r.left, rangeTop, r.right,
-                stale ? Math.max(rangeTop, r.bottom - secondary * .8f) : r.bottom);
-        drawBatteryValue(canvas, percent, r.left, y, size, r.width(), valid, stale);
-        stateText(canvas, range, rangeBounds, secondary, SAGE);
+        float size = fit(value, Math.min((valid ? 32f : 18f) * unit(),
+                r.height() * (valid ? .40f : .18f)), r.width(),
+                Fonts.regular(getContext()));
+        TextPaint labelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        labelPaint.setTypeface(Fonts.regular(getContext()));
+        Fonts.cardText(labelPaint);
+        labelPaint.setTextSize(secondary);
+        labelPaint.setColor(SAGE);
+        StaticLayout label = StaticLayout.Builder.obtain(range, 0, range.length(),
+                        labelPaint, Math.max(1, (int) r.width()))
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setIncludePad(false)
+                .setMaxLines(2)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+                .build();
+        paint.setTypeface(Fonts.regular(getContext()));
+        Fonts.cardText(paint);
+        paint.setTextSize(size);
+        Paint.FontMetrics metrics = paint.getFontMetrics();
+        float valueHeight = metrics.descent - metrics.ascent;
+        float gap = secondary * .35f;
+        float updatedHeight = stale ? secondary * 1.1f : 0;
+        float blockHeight = valueHeight + gap + label.getHeight() + updatedHeight;
+        float top = r.centerY() - blockHeight / 2f;
+        centeredText(canvas, value, r.centerX(), top - metrics.ascent, size,
+                stale ? DIM : CREAM, Fonts.regular(getContext()), r.width());
+        canvas.save();
+        canvas.translate(r.left, top + valueHeight + gap);
+        label.draw(canvas);
+        canvas.restore();
         if (stale && battery.updated != null && !battery.updated.isEmpty()) {
             String updated = words.getString(R.string.board_updated, battery.updated);
-            text(canvas, updated, r.left, r.bottom,
-                    fit(updated, Math.min(10f * unit(), secondary * .75f), r.width(),
-                            Fonts.regular(getContext())), DIM,
+            centeredText(canvas, updated, r.centerX(), top + blockHeight,
+                    Math.min(10f * unit(), secondary * .75f), DIM,
                     Fonts.regular(getContext()), r.width());
         }
     }
 
-    private void drawBatteryValue(Canvas canvas, String value, float x, float baseline,
-            float size, float width, boolean valid, boolean stale) {
-        if (valid) {
-            paint.setTypeface(Fonts.regular(getContext()));
-            paint.setFontFeatureSettings("tnum");
-            paint.setTextSize(size);
-            float needed = paint.measureText(value) + size * .08f
-                    + paint.measureText("%") * .50f;
-            if (needed > width && needed > 0) {
-                size *= width / needed;
-            }
+    /** Wrap at a word boundary; only an oversized first word may split. */
+    private String wordWrappedTitle(String title, TextPaint textPaint, float width) {
+        String content = title.trim().replaceAll("\\s+", " ");
+        if (textPaint.measureText(content) <= width) {
+            return content;
         }
-        text(canvas, value, x, baseline, size, stale ? DIM : CREAM,
-                Fonts.regular(getContext()), width);
-        if (!valid) {
-            return;
+        int fit = textPaint.breakText(content, true, Math.max(1, width), null);
+        int boundary = content.lastIndexOf(' ', Math.min(fit, content.length() - 1));
+        if (boundary > 0) {
+            return content.substring(0, boundary) + "\n" + content.substring(boundary + 1);
         }
-        paint.setTypeface(Fonts.regular(getContext()));
-        paint.setTextSize(size);
-        float suffixX = x + paint.measureText(value) + size * .08f;
-        text(canvas, "%", suffixX, baseline, size * .50f, SAGE,
-                Fonts.regular(getContext()), Math.max(0f, x + width - suffixX));
+        int end = Math.max(1, fit);
+        if (end < content.length() && Character.isHighSurrogate(content.charAt(end - 1))) {
+            end = end > 1 ? end - 1 : Math.min(2, content.length());
+        }
+        return content.substring(0, end) + "\n" + content.substring(end).trim();
     }
 
     private void centeredText(Canvas canvas, String value, float center, float baseline,
@@ -852,6 +871,8 @@ public final class BoardView extends View {
                 .setIncludePad(false)
                 .setMaxLines(2)
                 .setEllipsize(TextUtils.TruncateAt.END)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                 .build();
     }
 

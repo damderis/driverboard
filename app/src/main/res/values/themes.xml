@@ -1,0 +1,31 @@
+<resources>
+    <style name="Theme.DriveBoard" parent="Theme.Material3Expressive.DynamicColors.DayNight.NoActionBar">
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+        <item name="fontFamily">@font/google_sans_flex</item>
+        <item name="toolbarStyle">@style/Widget.Material3Expressive.Toolbar</item>
+        <item name="materialButtonToggleGroupStyle">@style/Widget.Material3Expressive.MaterialButtonToggleGroup</item>
+        <item name="chipStyle">@style/Widget.Material3.Chip.Filter</item>
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.DriveBoard.Headline</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.DriveBoard.Title</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.DriveBoard.Body</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.DriveBoard.Label</item>
+    </style>
+
+    <style name="TextAppearance.DriveBoard.Headline" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="fontFamily">@font/google_sans_flex</item>
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="TextAppearance.DriveBoard.Title" parent="TextAppearance.Material3.TitleMedium">
+        <item name="fontFamily">@font/google_sans_flex</item>
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+    </style>
+    <style name="TextAppearance.DriveBoard.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="fontFamily">@font/google_sans_flex</item>
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+    </style>
+    <style name="TextAppearance.DriveBoard.Label" parent="TextAppearance.Material3.LabelLarge">
+        <item name="fontFamily">@font/google_sans_flex</item>
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+    </style>
+</resources>

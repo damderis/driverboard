@@ -1,49 +1,77 @@
 package local.driveboard;
 
 import android.Manifest;
-import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
-import android.os.Build;
-import android.provider.MediaStore;
-import android.widget.ImageView;
-import android.widget.Toast;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
-import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
+import com.google.android.material.color.DynamicColors;
+import com.google.android.material.color.DynamicColorsOptions;
+import com.google.android.material.color.MaterialColors;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public final class MainActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
+public final class MainActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final int PICK_BACKGROUND = 20;
     private final ExecutorService pictureWorker = Executors.newSingleThreadExecutor();
     private ImageView backgroundThumbnail;
     private TextView backgroundPlaceholder;
     private TextView removeBackground;
     private long thumbnailVersion = Long.MIN_VALUE;
-    private static final int CREAM = 0xFFF4EFE4;
+    private static final String[] COLOUR_VALUES = {
+            "wallpaper", "album", "teal", "emerald", "navy", "maroon", "graphite"
+    };
+    private static final int[] PRESET_COLOURS = {
+            0, 0, 0xFF0F6E6E, 0xFF3FB978, 0xFF688FCB, 0xFFC36B82, 0xFF818A91
+    };
 
     private final Handler handler = new Handler();
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
             board.refresh();
+            if ("album".equals(Store.prefs(MainActivity.this).getString("colour_source", "wallpaper"))) {
+                int currentSeed = BoardColours.current(MainActivity.this,
+                        WidgetData.mediaSnapshot(MainActivity.this).art).seed;
+                // Defer a live retheme while a dialog or system window has focus.
+                if (currentSeed != themeSeed && hasWindowFocus()) {
+                    recreate();
+                    return;
+                }
+            }
             updateStates();
             handler.postDelayed(this, 1000);
         }
@@ -54,7 +82,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     private TextView batteryDetail;
     private TextView batteryValue;
     private TextView allowed;
-    private Button grant;
+    private MaterialButton grant;
     private int ink;
     private int muted;
     private int cardColor;
@@ -64,8 +92,11 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     private boolean locating;
     private boolean night;
     private String selectedMode = Store.FULL;
-    private Button fullModeButton;
-    private Button splitModeButton;
+    private MaterialButton fullModeButton;
+    private MaterialButton splitModeButton;
+    private int themeSeed;
+    private ScrollView scrollView;
+    private int savedScrollY;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -75,12 +106,35 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) {
+            selectedMode = state.getString("selected_mode", Store.FULL);
+            savedScrollY = state.getInt("scroll_y", 0);
+        }
+        String source = Store.prefs(this).getString("colour_source", "wallpaper");
+        themeSeed = BoardColours.current(this, WidgetData.mediaSnapshot(this).art).seed;
+        if ("wallpaper".equals(source)) {
+            DynamicColors.applyToActivityIfAvailable(this);
+        } else {
+            DynamicColors.applyToActivityIfAvailable(this,
+                    new DynamicColorsOptions.Builder().setContentBasedSource(themeSeed).build());
+        }
         BackgroundStore.cleanupLegacy(this);
         build();
     }
 
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        state.putString("selected_mode", selectedMode);
+        state.putInt("scroll_y", scrollView == null ? 0 : scrollView.getScrollY());
+        super.onSaveInstanceState(state);
+    }
+
     private int dp(float value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private int materialColor(int attribute) {
+        return MaterialColors.getColor(this, attribute, Color.BLACK);
     }
 
     private void build() {
@@ -88,11 +142,11 @@ public final class MainActivity extends Activity implements SharedPreferences.On
                 == Configuration.UI_MODE_NIGHT_YES;
         night = dark;
         Tone tone = Tone.current(this);
-        accent = night ? CREAM : tone.ground;
-        ink = night ? CREAM : 0xFF1D2423;
-        muted = night ? 0xFFA9C2BD : 0xFF5F6763;
-        cardColor = night ? tone.panel : 0xFFFAF7F1;
-        hairline = night ? 0xFF46605B : 0xFFE3DCCF;
+        accent = materialColor(androidx.appcompat.R.attr.colorPrimary);
+        ink = materialColor(com.google.android.material.R.attr.colorOnSurface);
+        muted = materialColor(com.google.android.material.R.attr.colorOnSurfaceVariant);
+        cardColor = materialColor(com.google.android.material.R.attr.colorSurfaceContainerHigh);
+        hairline = materialColor(com.google.android.material.R.attr.colorOutlineVariant);
 
         getWindow().setDecorFitsSystemWindows(false);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -100,8 +154,9 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         getWindow().getDecorView().getWindowInsetsController();
 
         ScrollView scroll = new ScrollView(this);
+        scrollView = scroll;
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(night ? tone.ground : 0xFFEDE6DA);
+        scroll.setBackgroundColor(materialColor(com.google.android.material.R.attr.colorSurface));
         scroll.setOnApplyWindowInsetsListener((view, insets) -> {
             android.graphics.Insets bars = insets.getInsets(
                     WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
@@ -109,21 +164,26 @@ public final class MainActivity extends Activity implements SharedPreferences.On
             return insets;
         });
         LinearLayout content = column();
-        content.setPadding(dp(12), dp(8), dp(12), dp(16));
+        content.setPadding(dp(16), dp(4), dp(16), dp(24));
         scroll.addView(content);
 
         addTitle(content);
-        addModeSelector(content, tone);
+        addModeSelector(content);
         addBoard(content, tone);
+        MaterialCardView settingsCard = new MaterialCardView(this);
+        settingsCard.setRadius(dp(28));
+        settingsCard.setCardBackgroundColor(cardColor);
+        settingsCard.setCardElevation(0);
+        settingsCard.setStrokeWidth(0);
         LinearLayout card = column();
-        card.setBackground(shape(cardColor, 14));
-        content.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        settingsCard.addView(card);
+        content.addView(settingsCard, new LinearLayout.LayoutParams(-1, -2));
         addPrayerRow(card);
         addMediaRow(card);
         addBatteryRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
-        addLanguageRow(card, tone);
+        addLanguageRow(card);
         addFooter(content);
 
         setContentView(scroll);
@@ -131,31 +191,40 @@ public final class MainActivity extends Activity implements SharedPreferences.On
                 .setSystemBarsAppearance(dark ? 0 : 24, 24));
         scroll.requestApplyInsets();
         board.post(this::updateAspect);
+        scroll.post(() -> scroll.scrollTo(0, savedScrollY));
         updateStates();
     }
 
     private void addTitle(LinearLayout content) {
-        TextView title = text(getString(R.string.app_name), 26, true);
-        title.setTypeface(Fonts.extraBold(this));
-        title.setTextColor(accent);
-        title.setPadding(dp(8), dp(6), dp(8), dp(14));
-        content.addView(title);
+        MaterialToolbar toolbar = new MaterialToolbar(this, null,
+                androidx.appcompat.R.attr.toolbarStyle);
+        toolbar.setTitle(R.string.app_name);
+        toolbar.setTitleTextAppearance(this, R.style.TextAppearance_DriveBoard_Headline);
+        toolbar.setTitleTextColor(ink);
+        toolbar.setBackgroundColor(Color.TRANSPARENT);
+        toolbar.setContentInsetsAbsolute(0, 0);
+        content.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(88)));
     }
 
     private void addBoard(LinearLayout content, Tone tone) {
         board = new BoardView(this);
         board.setCarNight(night);
         board.setMode(selectedMode);
-        board.setBackground(shape(tone.ground, 14));
-        if (night) {
-            GradientDrawable edge = shape(Color.TRANSPARENT, 14);
-            edge.setStroke(dp(1), hairline);
-            board.setForeground(edge);
-        }
+        MaterialCardView preview = new MaterialCardView(this);
+        preview.setRadius(dp(32));
+        preview.setCardBackgroundColor(tone.ground);
+        preview.setCardElevation(0);
+        preview.setStrokeColor(hairline);
+        preview.setStrokeWidth(dp(1));
+        preview.setClipToOutline(true);
+        board.setBackground(shape(tone.ground, 32));
         board.setClipToOutline(true);
         board.setContentDescription(getString(R.string.preview_description));
         board.setEditing(true, () -> {});
-        content.addView(board, new LinearLayout.LayoutParams(-1, dp(150)));
+        preview.addView(board, new FrameLayout.LayoutParams(-1, dp(150)));
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, -2);
+        previewParams.bottomMargin = dp(4);
+        content.addView(preview, previewParams);
         board.addOnLayoutChangeListener((view, left, top, right, bottom,
                 oldLeft, oldTop, oldRight, oldBottom) -> updateAspect());
 
@@ -165,20 +234,34 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         content.addView(hint);
     }
 
-    private void addModeSelector(LinearLayout content, Tone tone) {
-        LinearLayout segments = new LinearLayout(this);
+    private void addModeSelector(LinearLayout content) {
+        MaterialButtonToggleGroup segments = new MaterialButtonToggleGroup(this, null,
+                com.google.android.material.R.attr.materialButtonToggleGroupStyle);
+        segments.setSingleSelection(true);
+        segments.setSelectionRequired(true);
         segments.setPadding(dp(3), dp(3), dp(3), dp(3));
-        segments.setBackground(shape(cardColor, 24));
+        segments.setBackground(shape(materialColor(
+                com.google.android.material.R.attr.colorSurfaceContainer), 28));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(54));
         params.bottomMargin = dp(10);
         content.addView(segments, params);
-        fullModeButton = modeButton(segments, R.string.full_screen, Store.FULL, tone);
-        splitModeButton = modeButton(segments, R.string.split_screen, Store.SPLIT, tone);
-        updateModeButtons(tone);
+        fullModeButton = modeButton(segments, R.string.full_screen);
+        splitModeButton = modeButton(segments, R.string.split_screen);
+        segments.check(Store.SPLIT.equals(selectedMode)
+                ? splitModeButton.getId() : fullModeButton.getId());
+        segments.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) {
+                return;
+            }
+            selectedMode = checkedId == splitModeButton.getId() ? Store.SPLIT : Store.FULL;
+            board.setMode(selectedMode);
+            updateAspect();
+        });
     }
 
-    private Button modeButton(LinearLayout segments, int label, String mode, Tone tone) {
-        Button option = new Button(this);
+    private MaterialButton modeButton(MaterialButtonToggleGroup segments, int label) {
+        MaterialButton option = new MaterialButton(this);
+        option.setId(View.generateViewId());
         option.setText(label);
         option.setTextSize(13);
         option.setAllCaps(false);
@@ -187,25 +270,26 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         option.setMinWidth(0);
         option.setMinimumHeight(dp(48));
         option.setPadding(dp(6), 0, dp(6), 0);
-        option.setOnClickListener(view -> {
-            selectedMode = mode;
-            board.setMode(mode);
-            updateModeButtons(tone);
-            updateAspect();
-        });
+        option.setCheckable(true);
+        option.setStrokeWidth(0);
+        option.setBackgroundTintList(toggleBackground());
+        option.setTextColor(toggleForeground());
         segments.addView(option, new LinearLayout.LayoutParams(0, dp(48), 1));
         return option;
     }
 
-    private void updateModeButtons(Tone tone) {
-        styleModeButton(fullModeButton, Store.FULL.equals(selectedMode), tone);
-        styleModeButton(splitModeButton, Store.SPLIT.equals(selectedMode), tone);
+    private ColorStateList toggleBackground() {
+        return new ColorStateList(
+                new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                new int[]{materialColor(com.google.android.material.R.attr.colorPrimaryContainer),
+                        materialColor(com.google.android.material.R.attr.colorSurfaceContainer)});
     }
 
-    private void styleModeButton(Button button, boolean selected, Tone tone) {
-        button.setSelected(selected);
-        button.setBackground(shape(selected ? filledControlColor(tone) : Color.TRANSPARENT, 21));
-        button.setTextColor(selected ? filledControlTextColor(tone) : ink);
+    private ColorStateList toggleForeground() {
+        return new ColorStateList(
+                new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                new int[]{materialColor(com.google.android.material.R.attr.colorOnPrimaryContainer),
+                        ink});
     }
 
     private void addPrayerRow(LinearLayout card) {
@@ -222,10 +306,13 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
         actionParams.topMargin = dp(8);
         prayer.addView(actions, actionParams);
-        Button location = pill(getString(R.string.use_location));
+        MaterialButton location = pill(getString(R.string.use_location));
+        location.setBackgroundTintList(ColorStateList.valueOf(materialColor(
+                com.google.android.material.R.attr.colorSecondaryContainer)));
+        location.setTextColor(materialColor(com.google.android.material.R.attr.colorOnSecondaryContainer));
         location.setOnClickListener(view -> useLocation());
         actions.addView(location);
-        TextView change = text(getString(R.string.change_zone), 12, true);
+        MaterialButton change = textButton(R.string.change_zone);
         change.setTextColor(accent);
         change.setGravity(Gravity.CENTER);
         change.setMinWidth(dp(48));
@@ -238,9 +325,12 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     private void addMediaRow(LinearLayout card) {
         LinearLayout media = row(card, true);
         description(media, R.string.now_playing);
-        allowed = text(getString(R.string.allowed), 13, true);
-        allowed.setTextColor(accent);
-        media.addView(allowed);
+        MaterialSwitch accessSwitch = new MaterialSwitch(this);
+        accessSwitch.setChecked(true);
+        accessSwitch.setClickable(false);
+        accessSwitch.setContentDescription(getString(R.string.allowed));
+        allowed = accessSwitch;
+        media.addView(accessSwitch);
         grant = pill(getString(R.string.grant));
         grant.setOnClickListener(view -> startActivity(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
@@ -258,25 +348,29 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private void addBackgroundRow(LinearLayout card) {
         LinearLayout row = row(card, true);
-        LinearLayout description = description(row, R.string.background);
+        row.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout description = description(header, R.string.background);
         backgroundPlaceholder = detail(description, getString(R.string.no_picture));
         backgroundThumbnail = new ImageView(this);
         backgroundThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
         backgroundThumbnail.setContentDescription(getString(R.string.background));
-        row.addView(backgroundThumbnail, new LinearLayout.LayoutParams(dp(56), dp(48)));
-        TextView choose = text(getString(R.string.choose_picture), 12, true);
-        choose.setTextColor(accent);
-        choose.setGravity(Gravity.CENTER);
-        choose.setMinHeight(dp(48));
-        choose.setMinWidth(dp(48));
-        choose.setPadding(dp(8), 0, dp(8), 0);
+        backgroundThumbnail.setBackground(shape(materialColor(
+                com.google.android.material.R.attr.colorSecondaryContainer), 14));
+        backgroundThumbnail.setClipToOutline(true);
+        header.addView(backgroundThumbnail, new LinearLayout.LayoutParams(dp(56), dp(48)));
+        LinearLayout actions = new LinearLayout(this);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(-1, dp(48));
+        actionsParams.topMargin = dp(8);
+        row.addView(actions, actionsParams);
+        MaterialButton choose = backgroundAction(getString(R.string.choose_picture));
         choose.setOnClickListener(view -> chooseBackgroundPicture());
-        row.addView(choose);
-        removeBackground = text(getString(R.string.remove_picture), 12, true);
-        removeBackground.setTextColor(accent);
-        removeBackground.setGravity(Gravity.CENTER);
-        removeBackground.setMinHeight(dp(48));
-        removeBackground.setMinWidth(dp(48));
+        LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(0, dp(48), 1);
+        action.rightMargin = dp(8);
+        actions.addView(choose, action);
+        removeBackground = backgroundAction(getString(R.string.remove_picture));
         removeBackground.setOnClickListener(view -> pictureWorker.execute(() -> {
             try {
                 BackgroundStore.remove(this);
@@ -291,8 +385,24 @@ public final class MainActivity extends Activity implements SharedPreferences.On
                         R.string.picture_remove_failed, Toast.LENGTH_LONG).show());
             }
         }));
-        row.addView(removeBackground);
+        actions.addView(removeBackground, new LinearLayout.LayoutParams(0, dp(48), 1));
         thumbnailVersion = Long.MIN_VALUE;
+    }
+
+    private MaterialButton backgroundAction(String label) {
+        MaterialButton button = new MaterialButton(this);
+        button.setText(label);
+        button.setTextSize(12);
+        button.setAllCaps(false);
+        button.setTypeface(Fonts.semibold(this));
+        button.setCornerRadius(dp(24));
+        button.setInsetTop(0);
+        button.setInsetBottom(0);
+        button.setBackgroundTintList(ColorStateList.valueOf(
+                materialColor(com.google.android.material.R.attr.colorSecondaryContainer)));
+        button.setTextColor(materialColor(
+                com.google.android.material.R.attr.colorOnSecondaryContainer));
+        return button;
     }
 
     private void chooseBackgroundPicture() {
@@ -330,43 +440,90 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private void addColoursRow(LinearLayout card) {
         LinearLayout colours = row(card, true);
-        LinearLayout description = description(colours, R.string.colours);
-        String[] values = {"wallpaper", "album", "teal", "emerald", "navy", "maroon", "graphite"};
+        colours.setOrientation(LinearLayout.VERTICAL);
+        colours.setGravity(Gravity.START);
+        LinearLayout description = column();
+        description.addView(text(getString(R.string.colours), 15, true));
+        colours.addView(description, new LinearLayout.LayoutParams(-1, -2));
         String[] labels = getResources().getStringArray(R.array.colour_sources);
         String selected = Store.prefs(this).getString("colour_source", "wallpaper");
         int selectedIndex = 0;
-        for (int index = 0; index < values.length; index++) {
-            if (values[index].equals(selected)) {
+        for (int index = 0; index < COLOUR_VALUES.length; index++) {
+            if (COLOUR_VALUES[index].equals(selected)) {
                 selectedIndex = index;
                 break;
             }
         }
         detail(description, labels[selectedIndex]);
-        final int checked = selectedIndex;
-        colours.setOnClickListener(view -> new AlertDialog.Builder(this)
-                .setTitle(R.string.colours)
-                .setSingleChoiceItems(labels, checked, (dialog, index) -> {
-                    Store.prefs(this).edit().putString("colour_source", values[index]).apply();
-                    dialog.dismiss();
-                    build();
-                })
-                .setNegativeButton(R.string.cancel_action, null)
-                .show());
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        ChipGroup chips = new ChipGroup(this);
+        chips.setSingleLine(true);
+        chips.setSingleSelection(true);
+        chips.setSelectionRequired(true);
+        chips.setChipSpacingHorizontal(dp(8));
+        chips.setPadding(0, dp(8), 0, dp(4));
+        scroller.addView(chips);
+        colours.addView(scroller, new LinearLayout.LayoutParams(-1, dp(64)));
+        int selectedId = View.NO_ID;
+        for (int index = 0; index < COLOUR_VALUES.length; index++) {
+            final int choice = index;
+            Chip chip = new Chip(this, null, com.google.android.material.R.attr.chipStyle);
+            chip.setId(View.generateViewId());
+            chip.setText(labels[index]);
+            chip.setTextSize(12);
+            chip.setTypeface(Fonts.medium(this));
+            chip.setCheckable(true);
+            chip.setCheckedIconVisible(false);
+            chip.setChipMinHeight(dp(48));
+            chip.setEnsureMinTouchTargetSize(true);
+            chip.setChipCornerRadius(dp(24));
+            chip.setChipBackgroundColor(toggleBackground());
+            chip.setTextColor(toggleForeground());
+            chip.setChipStrokeWidth(dp(1));
+            chip.setChipStrokeColor(ColorStateList.valueOf(hairline));
+            if (index >= 2) {
+                chip.setChipIconResource(R.drawable.ic_colour_dot);
+                chip.setChipIconTint(ColorStateList.valueOf(PRESET_COLOURS[index]));
+                chip.setChipIconVisible(true);
+            }
+            chip.setOnClickListener(view -> {
+                Store.prefs(this).edit().putString("colour_source", COLOUR_VALUES[choice]).apply();
+                recreate();
+            });
+            chips.addView(chip, new LinearLayout.LayoutParams(-2, dp(48)));
+            if (index == selectedIndex) {
+                selectedId = chip.getId();
+            }
+        }
+        chips.check(selectedId);
     }
 
-    private void addLanguageRow(LinearLayout card, Tone tone) {
+    private void addLanguageRow(LinearLayout card) {
         LinearLayout language = row(card, true);
         description(language, R.string.language);
-        LinearLayout segments = new LinearLayout(this);
+        MaterialButtonToggleGroup segments = new MaterialButtonToggleGroup(this, null,
+                com.google.android.material.R.attr.materialButtonToggleGroupStyle);
+        segments.setSingleSelection(true);
+        segments.setSelectionRequired(true);
         segments.setBackground(shape(hairline, 24));
         language.addView(segments);
-        for (String lang : new String[]{"en", "ms"}) {
-            addLanguageOption(segments, lang, tone);
-        }
+        MaterialButton en = addLanguageOption(segments, "en");
+        MaterialButton ms = addLanguageOption(segments, "ms");
+        segments.check("ms".equals(Store.prefs(this).getString("lang", "en"))
+                ? ms.getId() : en.getId());
+        segments.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (isChecked) {
+                Store.prefs(this).edit().putString("lang",
+                        checkedId == ms.getId() ? "ms" : "en").apply();
+                recreate();
+            }
+        });
     }
 
-    private void addLanguageOption(LinearLayout segments, String lang, Tone tone) {
-        Button option = new Button(this);
+    private MaterialButton addLanguageOption(MaterialButtonToggleGroup segments, String lang) {
+        MaterialButton option = new MaterialButton(this);
+        option.setId(View.generateViewId());
         option.setText(lang.equals("en") ? "EN" : "BM");
         option.setTextSize(13);
         option.setStateListAnimator(null);
@@ -375,25 +532,22 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         option.setMinimumWidth(dp(52));
         option.setMinimumHeight(dp(48));
         option.setPadding(dp(10), 0, dp(10), 0);
-        boolean selected = lang.equals(Store.prefs(this).getString("lang", "en"));
-        option.setBackground(shape(selected ? filledControlColor(tone) : Color.TRANSPARENT, 24));
-        option.setTextColor(selected ? filledControlTextColor(tone) : ink);
+        option.setCheckable(true);
+        option.setStrokeWidth(0);
+        option.setBackgroundTintList(toggleBackground());
+        option.setTextColor(toggleForeground());
         option.setContentDescription(getString(lang.equals("en")
                 ? R.string.english : R.string.malay));
-        option.setSelected(selected);
-        option.setOnClickListener(view -> {
-            Store.prefs(this).edit().putString("lang", lang).apply();
-            recreate();
-        });
         segments.addView(option, new LinearLayout.LayoutParams(dp(54), dp(48)));
+        return option;
     }
 
     private void addFooter(LinearLayout content) {
-        TextView reset = text(getString(R.string.reset_layout), 13, false);
+        MaterialButton reset = textButton(R.string.reset_layout);
         reset.setGravity(Gravity.CENTER);
         reset.setMinHeight(dp(48));
         reset.setTextColor(accent);
-        reset.setOnClickListener(view -> new AlertDialog.Builder(this)
+        reset.setOnClickListener(view -> new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.reset_layout)
                 .setMessage(R.string.reset_layout_confirmation)
                 .setPositiveButton(R.string.reset_action, (dialog, which) -> Store.prefs(this).edit()
@@ -411,11 +565,11 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     }
 
     private int filledControlColor(Tone tone) {
-        return night ? CREAM : tone.ground;
+        return materialColor(androidx.appcompat.R.attr.colorPrimary);
     }
 
     private int filledControlTextColor(Tone tone) {
-        return night ? tone.ground : Color.WHITE;
+        return materialColor(com.google.android.material.R.attr.colorOnPrimary);
     }
 
     private LinearLayout column() {
@@ -471,15 +625,36 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         return label;
     }
 
-    private Button pill(String label) {
+    private MaterialButton textButton(int label) {
+        MaterialButton button = new MaterialButton(this);
+        button.setText(label);
+        button.setTextColor(accent);
+        button.setTypeface(Fonts.semibold(this));
+        button.setTextSize(12);
+        button.setAllCaps(false);
+        button.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
+        button.setStrokeWidth(0);
+        button.setMinimumWidth(dp(48));
+        button.setMinWidth(dp(48));
+        button.setMinimumHeight(dp(48));
+        button.setMinHeight(dp(48));
+        button.setInsetTop(0);
+        button.setInsetBottom(0);
+        button.setPadding(dp(12), 0, dp(12), 0);
+        return button;
+    }
+
+    private MaterialButton pill(String label) {
         Tone tone = Tone.current(this);
-        Button button = new Button(this);
+        MaterialButton button = new MaterialButton(this);
         button.setText(label);
         button.setStateListAnimator(null);
         button.setTextSize(12);
         button.setTypeface(Fonts.semibold(this));
         button.setTextColor(filledControlTextColor(tone));
-        button.setBackground(shape(filledControlColor(tone), 24));
+        button.setCornerRadius(dp(24));
+        button.setBackgroundTintList(ColorStateList.valueOf(
+                filledControlColor(tone)));
         button.setMinHeight(dp(48));
         button.setMinimumHeight(dp(48));
         button.setMinWidth(dp(48));
@@ -536,7 +711,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         for (int index = 0; index < zones.length; index++) {
             labels[index] = zones[index].code + " · " + zones[index].name;
         }
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.prayer_zone)
                 .setItems(labels, (dialog, index) -> {
                     locationMessage = null;

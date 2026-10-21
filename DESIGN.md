@@ -1,5 +1,21 @@
 ﻿# DriveBoard design record
 
+## Round 7 ? Material 3 Expressive (2026-10-21)
+
+This section supersedes the historical limestone/Atkinson direction below. The user-pinned contract is .impeccable/surfaces/n-java-local-driveboard-mainactivity-java-f08d8bf9.md. Existing references m3-board5.png and m3-lyrics4.png under .impeccable/review/car are not screenshots of round 7.
+
+The board keeps distinct dark tonal containers, cookie artwork, the prayer burst and wavy progress. Song titles wrap at word boundaries into at most two lines, with ellipsis at the end; ordinary long words may reduce type by up to 18% before an oversized word must split. The clock uses the complete compact date and font metrics to centre its time/date block. Prayer names sit above times with a gap of 0.28 times the time size; the redundant small next-prayer dot is removed. Localised countdowns omit zero hours and round remaining minutes up. Battery text is centred inside a padded inscribed square when the container is circular, with a modest missing-value dash and secondary-size two-line status.
+
+The phone uses Java MDC Views and a Material3Expressive dynamic-colour DayNight theme with bundled Google Sans Flex typography. Wallpaper remains the default source; album art and presets use the same seed from BoardColours as the car. The preview remains editable within a large rounded MaterialCardView. Connected toggle groups, colour chips, rounded settings, permission access, zone selection/location, background import/removal, language selection and confirmed reset preserve existing functions. Insets include system bars and cutouts; settings scroll and controls target at least 48dp. System Back retains platform/AppCompat behaviour.
+
+MDC 1.14.0 offers Expressive themes, button groups/styles, lists, top app bars, shape motion and LoadingIndicator in Views. Sources: [official 1.14.0 release notes](https://github.com/material-components/material-components-android/releases/tag/1.14.0), linked official component documentation, and the locally resolved 1.14.0 AAR. No Kotlin or Compose was added.
+
+Review verdict: Astra 6 source review finds the car geometry coherent at default full 1768?956/1020 and split 1144?956 proportions, including battery safe area and prayer separation. This is source review, not visual acceptance. BoardScreen is untouched: software lockCanvas(null), host surface ownership and the stale-destroy guard remain. Lyrics drawing is unchanged. Final verification: gradlew test assembleDebug passed with ANDROID_USER_HOME set to this workspace?s .android; all 14 tests passed in both debug and release variants. git diff --check passed. adb install -r was attempted and failed with ?no devices/emulators found?; the authorised single MainActivity launch and logcat crash check remain unperformed. No phone taps or settings changes were made, and Git was used read-only. Visual acceptance at the three car sizes, EN/BM, DayNight, large text and live battery states remains with the owner.
+
+Raster provenance: no new shipping raster was generated. Existing Google Sans Flex and launcher assets are reused; the new colour dot is vector geometry. Album art and chosen backgrounds remain user/media-provided runtime content. No new device screenshots were captured.
+
+## Historical records (before round 7)
+
 Reviewed 2026-10-21 against the approved safer-masjid sketch and surface brief.
 
 The phone is a quiet limestone editor: tone-coloured 26sp ExtraBold title, full-width rounded car preview, a short editing hint, and one settings card. Each settings row has at least 60dp height; buttons and swatches have at least 48dp touch area. The screen scrolls and respects system bars/cutouts. System night uses the selected tone's ground/panel with cream text.

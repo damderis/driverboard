@@ -9,7 +9,7 @@
     <string name="board_updated">Updated %1$s</string>
     <string name="board_stale">Cached</string>
     <string name="board_no_car_data">No car data</string>
-    <string name="board_imminent_minutes">in %1$d min</string>
+    <string name="board_imminent_minutes">in %1$dm</string>
     <string name="prayer_waiting">Waiting for prayer times</string>
     <string name="prayer_unavailable">Prayer times unavailable</string>
     <string name="prayer_offline">Offline</string>

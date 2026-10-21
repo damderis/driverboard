@@ -328,8 +328,12 @@ public final class WidgetData {
             String countdown = "—";
             if (next >= 0) {
                 long seconds = Duration.between(now, times[next]).getSeconds();
-                countdown = AppLocale.wrap(c).getString(
-                        R.string.prayer_countdown, seconds / 3600, seconds / 60 % 60);
+                long totalMinutes = (seconds + 59) / 60;
+                long hours = totalMinutes / 60;
+                long minutes = totalMinutes % 60;
+                countdown = hours == 0
+                        ? AppLocale.wrap(c).getString(R.string.board_imminent_minutes, minutes)
+                        : AppLocale.wrap(c).getString(R.string.prayer_countdown, hours, minutes);
             }
             return new PrayerSnapshot(rows, zoneName(c), z, countdown,
                     today ? (next < 0 ? "tomorrow_waiting" : "live") : "stale", updated);
