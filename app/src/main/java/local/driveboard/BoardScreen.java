@@ -245,6 +245,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = false;
+        board.releaseMediaControls();
         board.cancelLayoutTransition();
         android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
         frameScheduled = false;
@@ -308,6 +309,7 @@ public final class BoardScreen extends Screen {
         visibleArea.setEmpty();
         stableArea.setEmpty();
         container = nextContainer;
+        board.setSurfaceDpi(nextContainer.getDpi());
         surface = nextSurface;
         fps = 30;
         slowFrames = 0;
@@ -543,7 +545,12 @@ public final class BoardScreen extends Screen {
                 || lastDrawArea.isEmpty() || !lastDrawArea.contains((int) x, (int) y)) {
             return;
         }
-        if (lyricsVisible || board.hitNowPlaying(x - lastDrawArea.left, y - lastDrawArea.top)) {
+        float localX = x - lastDrawArea.left;
+        float localY = y - lastDrawArea.top;
+        if (board.hitMediaControl(localX, localY)) {
+            return;
+        }
+        if (lyricsVisible || board.hitNowPlaying(localX, localY)) {
             toggleLyrics();
         }
     }

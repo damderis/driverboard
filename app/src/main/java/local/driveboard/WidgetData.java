@@ -29,6 +29,9 @@ import org.json.JSONObject;
 
 /** Shared board data. Network requests never run on a drawing thread. */
 public final class WidgetData {
+    public static final String MEDIA_PREVIOUS = "previous";
+    public static final String MEDIA_PLAY_PAUSE = "play_pause";
+    public static final String MEDIA_NEXT = "next";
     private static final ZoneId MALAYSIA = ZoneId.of("Asia/Kuala_Lumpur");
     private static final ExecutorService NETWORK = Executors.newSingleThreadExecutor();
     private static final String[] FIELDS = {"fajr", "dhuhr", "asr", "maghrib", "isha"};
@@ -94,9 +97,22 @@ public final class WidgetData {
         public final float speed;
         public final boolean playing;
         public final boolean hasTrack;
+        /** The exact session represented by this snapshot, if one is available. */
+        public final MediaController controller;
+        public final PlaybackState playbackState;
+        public final boolean canPrevious;
+        public final boolean canToggle;
+        public final boolean canNext;
 
         public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
                 long position, long updatedAt, float speed, boolean playing, boolean hasTrack) {
+            this(title, artist, album, art, duration, position, updatedAt, speed, playing,
+                    hasTrack, null, null);
+        }
+
+        public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
+                long position, long updatedAt, float speed, boolean playing, boolean hasTrack,
+                MediaController controller, PlaybackState playbackState) {
             this.title = title;
             this.artist = artist;
             this.album = album;
@@ -107,6 +123,11 @@ public final class WidgetData {
             this.speed = speed;
             this.playing = playing;
             this.hasTrack = hasTrack;
+            this.controller = controller;
+            this.playbackState = playbackState;
+            this.canPrevious = supportsMediaAction(playbackState, MEDIA_PREVIOUS);
+            this.canToggle = supportsMediaAction(playbackState, MEDIA_PLAY_PAUSE);
+            this.canNext = supportsMediaAction(playbackState, MEDIA_NEXT);
         }
 
         public long estimatedPositionMs() {
@@ -158,7 +179,7 @@ public final class WidgetData {
         if (data == null) {
             return new MediaSnapshot(lc.getString(R.string.media_playing), "\u2014", "", null,
                     0, state.getPosition(), state.getLastPositionUpdateTime(),
-                    state.getPlaybackSpeed(), playing, false);
+                    state.getPlaybackSpeed(), playing, false, controller, state);
         }
         String title = nonempty(data.getString(MediaMetadata.METADATA_KEY_TITLE),
                 data.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE));
@@ -170,7 +191,64 @@ public final class WidgetData {
         return new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
                 artist, album, art, duration, state.getPosition(),
                 state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), playing,
-                title != null && !title.trim().isEmpty());
+                title != null && !title.trim().isEmpty(), controller, state);
+    }
+
+    /** Whether the session advertises the requested control in its current playback state. */
+    public static boolean supportsMediaAction(PlaybackState state, String action) {
+        if (state == null || action == null) {
+            return false;
+        }
+        long actions = state.getActions();
+        switch (action) {
+            case MEDIA_PREVIOUS:
+                return (actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0;
+            case MEDIA_NEXT:
+                return (actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0;
+            case MEDIA_PLAY_PAUSE:
+                long required = state.getState() == PlaybackState.STATE_PLAYING
+                        ? PlaybackState.ACTION_PAUSE : PlaybackState.ACTION_PLAY;
+                return (actions & (required | PlaybackState.ACTION_PLAY_PAUSE)) != 0;
+            default:
+                return false;
+        }
+    }
+
+    /** Sends a control to the session shown in {@code snapshot}; null means dispatched. */
+    public static String performMediaAction(MediaSnapshot snapshot, String action) {
+        if (snapshot == null || snapshot.controller == null) {
+            return "Media control unavailable";
+        }
+        try {
+            MediaController controller = snapshot.controller;
+            PlaybackState state = controller.getPlaybackState();
+            if (!supportsMediaAction(state, action)) {
+                return "Player does not support this control";
+            }
+            MediaController.TransportControls controls = controller.getTransportControls();
+            switch (action) {
+                case MEDIA_PREVIOUS:
+                    controls.skipToPrevious();
+                    break;
+                case MEDIA_NEXT:
+                    controls.skipToNext();
+                    break;
+                case MEDIA_PLAY_PAUSE:
+                    boolean playing = state.getState() == PlaybackState.STATE_PLAYING;
+                    if (playing) {
+                        controls.pause();
+                    } else {
+                        controls.play();
+                    }
+                    break;
+                default:
+                    return "Unknown media control";
+            }
+            return null;
+        } catch (RuntimeException ignored) {
+            // A session can disappear between displaying and tapping its controls.
+            return "Media control unavailable";
+        }
     }
 
     private static synchronized Bitmap artwork(MediaMetadata data, MediaSession.Token session,

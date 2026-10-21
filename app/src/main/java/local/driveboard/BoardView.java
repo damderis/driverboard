@@ -11,6 +11,10 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.media.session.MediaController;
+import android.media.session.PlaybackState;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.text.Layout;
 import android.text.StaticLayout;
@@ -41,6 +45,30 @@ public final class BoardView extends View {
     private WidgetData.PrayerSnapshot prayer;
     private WeatherRepository.Snapshot weather;
     private WidgetData.MediaSnapshot media;
+    private float surfaceDpScale;
+    private MediaController controlController;
+    private PlaybackState controlState;
+    private Boolean optimisticPlaying;
+    private MediaControlLayout.Control pressedControl;
+    private MediaControlLayout drawnControls;
+    private RectF drawnControlBounds;
+    private final Handler controlHandler = new Handler(
+            Looper.getMainLooper());
+    private final MediaController.Callback controlCallback =
+            new MediaController.Callback() {
+                @Override
+                public void onPlaybackStateChanged(PlaybackState state) {
+                    controlState = state;
+                    optimisticPlaying = null;
+                    requestControlDraw();
+                }
+
+                @Override
+                public void onSessionDestroyed() {
+                    releaseMediaControls();
+                    requestControlDraw();
+                }
+            };
     private String time = DASH;
     private String date = DASH;
     private Bitmap background;
@@ -218,6 +246,222 @@ public final class BoardView extends View {
         }
     }
 
+    public void setSurfaceDpi(int dpi) {
+        surfaceDpScale = dpi > 0 ? dpi / 160f : getResources().getDisplayMetrics().density;
+    }
+
+    public void releaseMediaControls() {
+        if (controlController != null) {
+            try {
+                controlController.unregisterCallback(controlCallback);
+            } catch (RuntimeException ignored) {
+                // The session may already have disappeared.
+            }
+        }
+        controlController = null;
+        controlState = null;
+        optimisticPlaying = null;
+        pressedControl = null;
+        drawnControls = null;
+        drawnControlBounds = null;
+        controlHandler.removeCallbacksAndMessages(null);
+    }
+
+    private void bindMediaControls() {
+        MediaController next = media == null ? null : media.controller;
+        if (frameRequestHook == null) {
+            controlState = media == null ? null : media.playbackState;
+            return;
+        }
+        boolean same = next == null ? controlController == null
+                : controlController != null
+                && next.getSessionToken().equals(controlController.getSessionToken());
+        if (!same) {
+            releaseMediaControls();
+            controlController = next;
+            if (next != null) {
+                try {
+                    next.registerCallback(controlCallback, controlHandler);
+                } catch (RuntimeException ignored) {
+                    // Polling snapshots still reconcile the state if the session disappears.
+                }
+            }
+        }
+        if (optimisticPlaying == null) {
+            controlState = media == null ? null : media.playbackState;
+        }
+    }
+
+    private void requestControlDraw() {
+        invalidateStatic();
+        if (frameRequestHook != null) {
+            frameRequestHook.run();
+        }
+    }
+
+    private boolean controlPlaying() {
+        return optimisticPlaying != null ? optimisticPlaying
+                : controlState != null && controlState.getState()
+                == PlaybackState.STATE_PLAYING;
+    }
+
+    private static String controlAction(MediaControlLayout.Control control) {
+        switch (control) {
+            case PREVIOUS:
+                return WidgetData.MEDIA_PREVIOUS;
+            case NEXT:
+                return WidgetData.MEDIA_NEXT;
+            default:
+                return WidgetData.MEDIA_PLAY_PAUSE;
+        }
+    }
+
+    /** Only the car calls this; phone gestures continue to edit the layout. */
+    public boolean hitMediaControl(float x, float y) {
+        MediaControlLayout targets = drawnControls;
+        if (drawnControlBounds == null || !drawnControlBounds.contains(x, y)) {
+            return false;
+        }
+        MediaControlLayout.Control control = targets == null ? null : targets.hit(x, y);
+        if (control == null) {
+            return false;
+        }
+        pressedControl = control;
+        String action = controlAction(control);
+        boolean wasPlaying = controlPlaying();
+        try {
+            PlaybackState current = media == null || media.controller == null
+                    ? null : media.controller.getPlaybackState();
+            if (current != null) {
+                wasPlaying = current.getState() == PlaybackState.STATE_PLAYING;
+            }
+        } catch (RuntimeException ignored) {
+            // Dispatch below reports a disappeared session.
+        }
+        String result = WidgetData.performMediaAction(media, action);
+        if (result == null && control == MediaControlLayout.Control.PLAY_PAUSE) {
+            optimisticPlaying = !wasPlaying;
+            controlHandler.removeCallbacks(reconcileControlState);
+            controlHandler.postDelayed(reconcileControlState, 2000);
+        }
+        CarDiagnostics.log(getContext(), "Media control " + action + ": "
+                + (result == null ? "dispatched" : result));
+        requestControlDraw();
+        controlHandler.removeCallbacks(clearControlPress);
+        controlHandler.postDelayed(clearControlPress, 150);
+        return true;
+    }
+
+    private final Runnable clearControlPress = () -> {
+        pressedControl = null;
+        requestControlDraw();
+    };
+
+    private final Runnable reconcileControlState = () -> {
+        optimisticPlaying = null;
+        try {
+            controlState = controlController == null ? null : controlController.getPlaybackState();
+        } catch (RuntimeException ignored) {
+            controlState = null;
+        }
+        requestControlDraw();
+    };
+
+    private float controlDpScale() {
+        return surfaceDpScale > 0 ? surfaceDpScale : getResources().getDisplayMetrics().density;
+    }
+
+    private RectF mediaContent(RectF bounds) {
+        float pad = Math.max(2f * unit(), Math.min(bounds.width(), bounds.height()) * .08f);
+        return new RectF(bounds.left + pad, bounds.top + pad,
+                bounds.right - pad, bounds.bottom - pad);
+    }
+
+    private MediaControlLayout mediaControlLayout(RectF r) {
+        float artSize = Math.min(r.height() * .95f, r.width() * .45f);
+        return MediaControlLayout.create(r.left + artSize + 10f * unit(), r.top,
+                r.right, r.bottom, controlDpScale());
+    }
+
+    private MediaControlLayout lyricsControlLayout() {
+        float inset = Math.max(12f * unit(), getWidth() * .035f);
+        float height = getHeight() - 2f * inset;
+        float width = Math.min(height * .50f, (getWidth() - 2f * inset) * .31f);
+        return MediaControlLayout.create(inset, inset, inset + width,
+                getHeight() - inset, controlDpScale());
+    }
+
+    private MediaControlLayout currentControlLayout() {
+        if (lyricsVisible) {
+            return lyricsControlLayout();
+        }
+        BoardLayout.Card card = findCard("media");
+        return card == null ? null : mediaControlLayout(mediaContent(visualBounds(card)));
+    }
+
+    private void drawMediaControls(Canvas canvas) {
+        MediaControlLayout targets = currentControlLayout();
+        drawnControls = targets;
+        drawnControlBounds = lyricsVisible ? new RectF(0, 0, getWidth(), getHeight())
+                : findCard("media") == null ? null : visualBounds(findCard("media"));
+        if (targets == null) {
+            return;
+        }
+        int save = canvas.save();
+        if (!lyricsVisible) {
+            BoardLayout.Card card = findCard("media");
+            RectF bounds = visualBounds(card);
+            float alpha = transitionAlpha(card.type, SystemClock.uptimeMillis());
+            canvas.saveLayerAlpha(bounds, Math.round(alpha * 255f));
+            canvas.clipPath(cardPath(card.type, bounds));
+        }
+        for (MediaControlLayout.Control control : MediaControlLayout.Control.values()) {
+            MediaControlLayout.Target target = targets.target(control);
+            if (target == null) {
+                continue;
+            }
+            float cx = (target.left + target.right) / 2f;
+            float cy = (target.top + target.bottom) / 2f;
+            float radius = (target.right - target.left) * .43f;
+            boolean enabled = WidgetData.supportsMediaAction(controlState, controlAction(control));
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(null);
+            paint.setColor(colours.primary);
+            paint.setAlpha(enabled ? 255 : 80);
+            if (control == MediaControlLayout.Control.PLAY_PAUSE) {
+                canvas.drawCircle(cx, cy, radius, paint);
+            }
+            if (control == pressedControl) {
+                paint.setColor((colours.onSurface & 0x00FFFFFF) | 0x1F000000);
+                canvas.drawCircle(cx, cy, radius, paint);
+            }
+            paint.setColor(control == MediaControlLayout.Control.PLAY_PAUSE
+                    ? colours.onPrimary : colours.onSurface);
+            paint.setAlpha(enabled ? 255 : 80);
+            float g = radius * .47f;
+            Path glyph = new Path();
+            if (control == MediaControlLayout.Control.PLAY_PAUSE && controlPlaying()) {
+                glyph.addRect(cx - g, cy - g, cx - g * .3f, cy + g, Path.Direction.CW);
+                glyph.addRect(cx + g * .3f, cy - g, cx + g, cy + g, Path.Direction.CW);
+            } else {
+                boolean previous = control == MediaControlLayout.Control.PREVIOUS;
+                float direction = previous ? -1f : 1f;
+                glyph.moveTo(cx - direction * g * .65f, cy - g);
+                glyph.lineTo(cx + direction * g, cy);
+                glyph.lineTo(cx - direction * g * .65f, cy + g);
+                glyph.close();
+                if (control != MediaControlLayout.Control.PLAY_PAUSE) {
+                    float bar = cx + direction * g * 1.2f;
+                    glyph.addRect(bar - g * .16f, cy - g, bar + g * .16f,
+                            cy + g, Path.Direction.CW);
+                }
+            }
+            canvas.drawPath(glyph, paint);
+        }
+        paint.setAlpha(255);
+        canvas.restoreToCount(save);
+    }
+
     private long currentLyricsPosition() {
         return isMediaPlaying() ? media.estimatedPositionMs() : lyricsPosition;
     }
@@ -337,6 +581,7 @@ public final class BoardView extends View {
         prayer = WidgetData.prayerSnapshot(words);
         weather = WeatherRepository.snapshot(words);
         media = WidgetData.mediaSnapshot(words);
+        bindMediaControls();
         background = BackgroundStore.load(getContext());
         colours = BoardColours.current(getContext(), media == null ? null : media.art);
         clearLyricBlocks();
@@ -535,6 +780,7 @@ public final class BoardView extends View {
         long now = SystemClock.uptimeMillis();
         if (isTransitioning()) {
             drawTransition(canvas, now);
+            drawMediaControls(canvas);
             recordDrawTime(drawStarted);
             return;
         }
@@ -565,6 +811,7 @@ public final class BoardView extends View {
         } else {
             drawProgress(canvas);
         }
+        drawMediaControls(canvas);
         recordDrawTime(drawStarted);
     }
 
@@ -945,13 +1192,17 @@ public final class BoardView extends View {
         }
         canvas.save();
         canvas.clipRect(content);
-        float artSize = Math.min(content.height() * .50f, content.width() * .31f);
+        MediaControlLayout controls = lyricsControlLayout();
+        float titleReserve = Math.min(20f * unit(), content.height() * .15f) * .80f * 2.5f
+                + 16f * unit();
+        float artSize = Math.max(0f, Math.min(Math.min(content.height() * .50f,
+                content.width() * .31f), controls.playPause.top - content.top - titleReserve));
         RectF artBounds = new RectF(content.left, content.top,
                 content.left + artSize, content.top + artSize);
-        if (staticPass) {
+        if (staticPass && artSize > 0f) {
             drawLyricsArt(canvas, artBounds);
         }
-        float leftWidth = artSize;
+        float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
         float titleSize = Math.min(20f * unit(), content.height() * .15f) * .80f;
         float titleY = artBounds.bottom + 8f * unit() + titleSize;
         if (staticPass && media != null) {
@@ -961,7 +1212,8 @@ public final class BoardView extends View {
                     titleY + titleSize * 1.2f, titleSize * .72f,
                     SAGE, Fonts.regular(getContext()), leftWidth);
         }
-        float lyricLeft = artBounds.right + Math.max(16f * unit(), content.width() * .05f);
+        float lyricLeft = content.left + leftWidth
+                + Math.max(16f * unit(), content.width() * .05f);
         RectF lyricArea = new RectF(lyricLeft, content.top,
                 content.right, content.bottom);
         if (lyricsLoading || lyrics == null || lyrics.isEmpty()) {
@@ -1435,7 +1687,8 @@ public final class BoardView extends View {
         boolean playing = media != null && media.playing;
         float titleSize = Math.min(19f * unit(), r.height() * .19f) * .75f;
         float artistSize = Math.min(13f * unit(), r.height() * .14f) * .80f;
-        float textTop = r.top + r.height() * .23f;
+        MediaControlLayout controls = mediaControlLayout(r);
+        float textTop = r.top;
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setTypeface(Fonts.semibold(getContext()));
         titlePaint.setTextSize(titleSize);
@@ -1449,15 +1702,23 @@ public final class BoardView extends View {
             // Preserve ordinary song words before resorting to a mid-word break.
             titlePaint.setTextSize(Math.max(titleSize * .82f, titleSize * width / widestWord));
         }
-        StaticLayout titleLayout = stateLayout(wordWrappedTitle(title, titlePaint, width),
-                titlePaint, width);
+        float titleRoom = controls.playPause.top - textTop - artistSize * 2.3f - 8f * unit();
+        int titleLines = Math.max(1, (int) (titleRoom / titlePaint.getFontSpacing()));
+        StaticLayout titleLayout = StaticLayout.Builder.obtain(title, 0, title.length(),
+                        titlePaint, Math.max(1, Math.round(width)))
+                .setIncludePad(false)
+                .setMaxLines(titleLines)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .build();
         canvas.save();
+        canvas.clipRect(x, textTop, r.right,
+                Math.max(textTop, textTop + titleRoom));
         canvas.translate(x, textTop);
         titleLayout.draw(canvas);
         canvas.restore();
-        float artistY = Math.min(r.bottom - artistSize,
+        float artistY = Math.min(controls.playPause.top - artistSize - 8f * unit(),
                 textTop + titleLayout.getHeight() + artistSize * 1.3f);
-        if (!artist.isEmpty()) {
+        if (!artist.isEmpty() && artistY >= r.top + artistSize) {
             text(canvas, artist, x, artistY, artistSize, SAGE,
                     Fonts.regular(getContext()), width);
         }
@@ -1481,7 +1742,7 @@ public final class BoardView extends View {
             float width = Math.max(1f, r.right - x);
             float progress = Math.max(0f, Math.min(1f,
                     (float) media.estimatedPositionMs() / media.duration));
-            float lineY = r.bottom - 3f * unit();
+            float lineY = mediaControlLayout(r).playPause.top - 5f * unit();
             canvas.save();
             float alpha = transitionAlpha(card.type, SystemClock.uptimeMillis());
             if (alpha < 1f) {
