@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ground:#eceae4;--panel:#1d2125;--panel2:#262b30;--ink:#16191c;--muted:#5d625f;--sign:#f1efe9;--kj:#e4002b;--kg:#00843d;--py:#ffc72c;--ag:#f58220;--action:#00843d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;background:var(--ground);font-family:"Atkinson Hyperlegible Next",sans-serif;color:var(--ink)}
+.status{height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:13px;font-weight:600}
+header{padding:10px 20px 14px;display:flex;align-items:flex-end;justify-content:space-between}
+h1{font-size:26px;font-weight:800;letter-spacing:-.02em}
+.car{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--kg)}
+.board{margin:0 12px;background:var(--panel);border-radius:14px;padding:8px;height:150px;display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(6,1fr);gap:4px}
+.w{background:var(--panel2);border-radius:6px;position:relative;overflow:hidden;color:var(--sign);padding:8px 8px 6px}
+.w::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:var(--line)}
+.lbl{font-size:7px;font-weight:700;letter-spacing:.06em;color:#a9afb3;display:flex;align-items:center;gap:4px}
+.rd{width:11px;height:11px;border-radius:50%;background:var(--line);color:#111;font-size:6px;font-weight:800;display:grid;place-items:center}
+.clock{grid-column:1/5;grid-row:1/7;--line:var(--ag)}
+.clock .t{font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-top:10px;font-variant-numeric:tabular-nums}
+.clock .d{font-size:9px;color:#c9cdd0;margin-top:4px}
+.pray{grid-column:5/13;grid-row:1/4;--line:var(--kg)}
+.pray .row{display:flex;justify-content:space-between;align-items:baseline;margin-top:3px}
+.pray .n{font-size:16px;font-weight:700}.pray .c{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.line{position:relative;height:12px;margin-top:3px}
+.line .track{position:absolute;left:4px;right:4px;top:5px;height:2px;background:var(--kg)}
+.line .st{position:absolute;top:2px;width:8px;height:8px;border-radius:50%;background:var(--panel2);border:2px solid var(--kg)}
+.line .now{position:absolute;top:1px;width:10px;height:10px;border-radius:2px;background:var(--sign)}
+.media{grid-column:5/10;grid-row:4/7;--line:var(--kj)}
+.media .ti{font-size:11px;font-weight:700;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.media .ar{font-size:8px;color:#c9cdd0}
+.bat{grid-column:10/13;grid-row:4/7;--line:var(--py)}
+.bat .p{font-size:20px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}.bat .k{font-size:8px;color:#c9cdd0}
+.hint{font-size:12px;color:var(--muted);padding:10px 20px 4px;display:flex;justify-content:space-between}
+.hint b{color:var(--ink)}
+section{margin:10px 12px 0;background:#f7f6f2;border-radius:14px;overflow:hidden}
+.item{display:flex;align-items:center;gap:12px;padding:13px 14px;border-top:1px solid #e2dfd7;min-height:60px}
+.item:first-child{border-top:0}
+.ic{width:28px;height:28px;border-radius:50%;background:var(--line);flex:none;display:grid;place-items:center;font-size:10px;font-weight:800;color:#111}
+.tx{flex:1}.tx .a{font-size:15px;font-weight:700}.tx .b{font-size:12px;color:var(--muted);margin-top:2px}
+.btn{font-size:13px;font-weight:700;color:#fff;background:var(--action);border-radius:20px;padding:9px 14px;white-space:nowrap}
+.ok{font-size:12px;font-weight:700;color:var(--kg)}
+.wait{font-size:12px;font-weight:700;color:#8a6d00}
+.foot{font-size:11px;color:var(--muted);padding:12px 20px}
+</style></head><body>
+<div class="status"><span>10:27</span><span>53%</span></div>
+<header><h1>DriveBoard</h1><span class="car"><span class="dot"></span>Proton e.MAS · last seen 08:12</span></header>
+<div class="board">
+ <div class="w clock"><div class="lbl"><span class="rd">CL</span>TIME</div><div class="t">10:27</div><div class="d">Tuesday, 21 Oct</div></div>
+ <div class="w pray"><div class="lbl"><span class="rd">SL</span>NEXT PRAYER · WLY01</div>
+  <div class="row"><span class="n">Zohor 13:01</span><span class="c">2h 33m</span></div>
+  <div class="line"><div class="track"></div><div class="st" style="left:2%"></div><div class="now" style="left:18%"></div><div class="st" style="left:30%;border-width:3px;background:var(--sign)"></div><div class="st" style="left:54%"></div><div class="st" style="left:76%"></div><div class="st" style="left:95%"></div></div>
+ </div>
+ <div class="w media"><div class="lbl"><span class="rd">NP</span>NOW PLAYING</div><div class="ti">Surah Al-Mulk</div><div class="ar">Mishary Alafasy · Quran</div></div>
+ <div class="w bat"><div class="lbl"><span class="rd">EV</span>BATTERY</div><div class="p">78%</div><div class="k">312 km</div></div>
+</div>
+<div class="hint"><span>Drag to move · corner to resize</span><b>Live in car</b></div>
+<section>
+ <div class="item" style="--line:var(--kg)"><span class="ic">SL</span><div class="tx"><div class="a">Prayer zone</div><div class="b">WLY01 · Kuala Lumpur, Putrajaya</div></div><span class="btn">Use location</span></div>
+ <div class="item" style="--line:var(--kj)"><span class="ic">NP</span><div class="tx"><div class="a">Now playing</div><div class="b">Reads Morphe and Quran sessions</div></div><span class="ok">Allowed</span></div>
+ <div class="item" style="--line:var(--py)"><span class="ic">EV</span><div class="tx"><div class="a">Car battery</div><div class="b">From the car on next drive</div></div><span class="wait">Waiting</span></div>
+ <div class="item" style="--line:#9aa0a4"><span class="ic">BM</span><div class="tx"><div class="a">Language</div><div class="b">English · Bahasa Melayu</div></div><span class="ok" style="color:var(--ink)">English</span></div>
+</section>
+<p class="foot">Battery and track values are sample data for this sketch.</p>
+</body></html>

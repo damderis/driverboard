@@ -1,56 +1,71 @@
-# DriveBoard
+﻿# DriveBoard
 
-A Java/native Views Android Auto development app: arrange a clock, Malaysia JAKIM next prayer, and active now-playing card on your phone, then render that same `BoardView` into the car host's navigation surface. Package: `local.driveboard`. Android 12+ (API 31), compile/target API 36. This is a sideloaded dashboard prototype using the navigation category, not a production navigation app or a claim of Google Play eligibility.
+Personal Android Auto board for a Proton e.MAS, with a native Java phone layout editor. Android 12+; package `local.driveboard`. This sideloaded navigation-surface prototype is not a production navigation app or a claim of Play eligibility.
 
-## Build and install (Windows / JDK 17)
+## Features
 
-Versions: AGP **8.12.0**, Gradle wrapper **9.3.1** (matched to the read-only `winwin-store/android` reference), `androidx.car.app:app` **1.7.0**. Google Maven metadata was checked on 2026-10-21: 1.7.0 is the latest stable; 1.8.0 is still RC and 1.9.0 is alpha. JUnit 4.13.2 is test-only; the car library is the sole direct runtime dependency.
+- Masjid Stone & Teal phone and car surfaces, with five live colour tones, system light/dark phone styling, and bundled Atkinson Hyperlegible Next Regular (400), SemiBold (600), ExtraBold (800). Google Fonts supplies a variable TTF; XML font families pin those three weights. Licence: `licenses/atkinsonhyperlegiblenext/OFL.txt`.
+- Clock/date, next JAKIM prayer and countdown, five daily prayers, active MediaSession title/artist, and car battery/range. The eight-point prayer star is drawn as two outlined squares. No sketch sample data is used.
+- Native settings card: zone picker/location, notification access, battery status, tone swatches, EN/BM. Native controls use sp text, at least 48dp targets, scrolling and system-bar insets. The car-aspect preview uses the shared proportional Canvas renderer.
+- Drag to move, bottom-right brass corner to resize on the 12 x 6 grid; preferences update the car live. Reset restores clock left, prayer upper right, music and battery below. Legacy layouts migrate to include battery.
+- EN/BM through `createConfigurationContext`; prayer names stay Subuh, Zohor, Asar, Maghrib, Isyak. Dates use the selected locale. Numerical drawing uses `tnum`.
 
-Create ignored `local.properties` with your SDK path, for example:
+## Build and install
 
-```properties
-sdk.dir=C:/Users/Adam/AppData/Local/Android/Sdk
-```
+JDK 17, Gradle wrapper 9.3.1, AGP 8.12.0, Android SDK 36, AndroidX Car App 1.7.0. Set `sdk.dir` in ignored `local.properties`.
 
-```powershell
-.\gradlew.bat assembleDebug
-.\gradlew.bat test
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r app/build/outputs/apk/debug/app-debug.apk
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" shell am start -W -n local.driveboard/.MainActivity
-```
-
-If the environment disallows writes to the normal Gradle/Android user directories, use workspace-local homes before running Gradle (both ignored by Git):
+Always build with `ANDROID_USER_HOME` set to this workspace's `.android` directory so the project-local debug key matches the installed app's signature.
 
 ```powershell
 $env:GRADLE_USER_HOME="$PWD\.gradle-user-home"
 $env:ANDROID_USER_HOME="$PWD\.android"
+.\gradlew.bat test assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -W -n local.driveboard/.MainActivity
 ```
 
-## Phone editor and Android Auto
+Enable Unknown sources in Android Auto developer settings yourself, then connect and select DriveBoard. The development service accepts installed hosts using `ALLOW_ALL_HOSTS_VALIDATOR`; restrict signatures before distributing it.
 
-Drag a card to move it. Drag its mint bottom-right handle to resize it. Positions and sizes snap to a 12 × 6 grid, clamp inside the board, and save immediately as JSON in SharedPreferences. Overlap is allowed. Reset restores the three starting cards. The preview uses the last visible car surface aspect ratio; before connecting it uses 1920 × 720.
+## Location and prayer data
 
-Enter a JAKIM zone such as `WLY01`, then tap **Save zone**. Tap **Grant notification access** and enable **DriveBoard now playing** in Android settings to show playing MediaSession title/artist. The notification listener itself is a no-op; no notification content is collected. Access may be revoked in the same system settings.
+Verified with Node HTTPS on 2026-10-21:
 
-To enable the sideloaded app in Android Auto: **Android Auto settings → tap Version 10 times → developer settings → Unknown sources**. Then connect to a compatible car host and choose DriveBoard. These settings must be changed by the user; the app does not change them.
+`GET https://api.waktusolat.app/zones/3.1390/101.6869` returned HTTP 200:
 
-The car service deliberately uses `ALLOW_ALL_HOSTS_VALIDATOR` for sideloaded development. Its `NavigationTemplate` has one Refresh action. It tracks visible/stable regions, clips all board drawing to the visible region, and measures/layouts the view at that region's dimensions. Surface rendering runs every second and on preference changes, and stops on lifecycle stop or surface destruction.
+```json
+{"zone":"WLY01","state":"KUL","district":"W.P. Kuala Lumpur"}
+```
 
-## Data behavior
+The app requests `/zones/{latitude}/{longitude}`, validates the returned zone against its bundled catalogue, saves code/name and refetches prayers. `GET https://api.waktusolat.app/zones` returned 60 entries with `jakimCode`, `negeri`, `daerah`; these provide offline zone names and the manual picker. Source: [API documentation](https://api.waktusolat.app/docs). Reproduction/evidence: `.impeccable/review/zone-endpoint.md` and `generate-zone-catalog.js`. No nearest-coordinate approximation is needed.
 
-- Clock uses device locale and the device's 12/24-hour preference.
-- Prayer endpoint: `https://www.e-solat.gov.my/index.php?r=esolatApi/takwimsolat&period=today&zone=WLY01`. The verified response contains `prayerTime[0]`, `status: "OK!"`, `zone`, and `serverTime`, with `fajr`, `dhuhr`, `asr`, `maghrib`, `isha` as `HH:mm:ss`. These are displayed as Subuh, Zohor, Asar, Maghrib, Isyak. Times and daily rollover use Asia/Kuala_Lumpur. Fetches run off the UI thread with timeouts, cache successful daily JSON per zone, and refresh daily or on zone change. Failures preserve cached values or show `—`; failed requests retry at most once per minute. After Isyak, tomorrow's Subuh time/countdown is explicitly marked **estimated**, using today's Subuh until the next daily response is available at midnight. Stale offline data is marked cached and has no misleading live countdown.
-- Media polls active sessions once per second, selecting the first playing session. Paused sessions show **Nothing playing**. Missing access shows **Grant access on phone**.
-- `BoardView.draw()` is for native drawing; WebView/video will need VirtualDisplay + Presentation later (see the `ponytail:` comment).
+Coarse location permission is requested only after Use location. The app uses `LocationManager.getCurrentLocation` with the network provider, then a recent last-known fallback; no Play Services. With permission already granted, opening the app checks again after twelve hours. Errors stay inline and preserve the selected zone; tap the row to pick manually. Approximate location near a zone boundary should be checked against the manual picker.
 
-## Verification and remaining checks
+Prayer source remains JAKIM: `https://www.e-solat.gov.my/index.php?r=esolatApi/takwimsolat&period=today&zone=WLY01`. Responses are validated and cached by zone/day, with Malaysia time for rollover. Network operations run off the drawing thread with timeouts. Old cache is dimmed and labelled with its actual update time. After Isyak, tomorrow's prayer remains unavailable until verified data arrives; today's Subuh is never presented as tomorrow's time.
 
-The plain JVM `BoardLayoutTest` covers snapping, move/resize clamping, and JSON round-trip without Android or `org.json` dependencies. `gradlew assembleDebug test` passes (debug and release unit-test variants).
+## Car energy and surface behavior
 
-Smoke check on 2026-10-21: installed onto the single connected Nothing A142 (Android 16), `adb install -r` returned `Success`, and `am start -W` returned `Status: ok` / cold launch in 813 ms. MainActivity remained resumed with a running app process; filtered AndroidRuntime and crash-buffer logs contained no DriveBoard crash. No other app was modified and Android Auto settings were left unchanged.
+On Car App API 3+, `CarHardwareManager` fetches `EnergyProfile` and subscribes to `EnergyLevel` for an EV. Only `CarValue.STATUS_SUCCESS` fields are saved as `battery_pct`, `range_m`, `battery_at`. The listener is removed when the screen stops. Battery/range support depends on the head unit sharing EnergyLevel; the Proton e.MAS is unverified until a drive. Missing data is a dash, the phone initially says Waiting, and data older than 30 minutes is dimmed with `updated HH:mm`. No phone battery or invented range is substituted.
 
-Environment notes: the first build was blocked by global Gradle/debug-keystore directory permissions; workspace-local user homes resolved it. Remaining nonfatal toolchain warnings concern Android analytics-directory access, SDK XML tooling version mismatch, and Gradle 10 deprecations. Windows curl's Schannel failed in this sandbox, so the live JAKIM JSON and Google Maven metadata were successfully verified with Node HTTPS instead.
+Inspect the first drive with `adb logcat -s DriveBoardCar` for API level, profile and energy field statuses. Car hardware permission declarations do not guarantee host support.
 
-Actual car display is **unverified**. Test the following on the car: app discovery, surface rendering, live phone edits, overlay/split-screen visible regions, disconnect/reconnect, and lifecycle stop/resume. On the phone, test drag/resize persistence, zone changes, cached/offline prayers, Malaysia midnight rollover, and notification access grant/revoke with real music playback. Android 12/12L runtime behavior is also unverified; the installation smoke check targets the connected Nothing A142 running Android 16.
+Each frame fills the complete surface with the selected ground colour, then renders inside the visible region, falling back to stable area and full bounds. Preference changes and one-second ticks redraw; screen stop removes callbacks/listeners.
 
-Version sources: [Google Maven metadata](https://dl.google.com/dl/android/maven2/androidx/car/app/app/maven-metadata.xml), [Car App Library documentation](https://developer.android.com/training/cars/apps/library).
+Notification access is optional. Grant opens Android notification-listener settings. The listener collects no notification content; active sessions supply playing metadata. Permission revocation and missing data remain explicit.
+
+## Contrast
+
+WCAG relative luminance, fixed cream `#F4EFE4` and sage `#A9C2BD` against each panel. All requested shades pass 4.5:1 without adjustment.
+
+| Tone | Ground / panel | Cream | Sage |
+| --- | --- | ---: | ---: |
+| Teal | #0F3D3E / #16494A | 8.78 | 5.34 |
+| Emerald | #0E3B2E / #15503F | 8.14 | 4.95 |
+| Navy | #13233F / #1B3156 | 11.30 | 6.87 |
+| Maroon | #3A1420 / #4D1D2C | 11.99 | 7.29 |
+| Graphite | #24272B / #2F3337 | 11.10 | 6.75 |
+
+`tools/font-and-contrast.cjs` reproduces these values; JUnit guards palette completeness and contrast. The phone uses amber `#8A6100` on limestone and a lighter amber on dark cards for Waiting.
+
+## Verification
+
+Build/test/install results and visual review are recorded in `.impeccable/review/verification.md`. The car itself requires a drive: app discovery, actual surface size and visible regions, live phone edits/tone/language, battery API statuses, disconnect/reconnect, stop/resume. Also test location grant/deny, zone changes, offline prayer cache and midnight rollover, media access grant/revoke and real music playback. Google Maps and a 3D car remain outside this change.

@@ -1,0 +1,60 @@
+{
+  "title": "Choose DriveBoard's look (familiar set)",
+  "question": "Three familiar directions, plus the category standard. Pick one, or re-roll.",
+  "options": [
+    {
+      "id": "safer-jkr",
+      "kind": "grounded",
+      "label": "Highway Sign Green",
+      "lineage": "JKR highway direction signs on every Malaysian expressway",
+      "thesis": "Every widget is a highway sign panel: white type on sign green, the next prayer posted like an exit with its countdown in amber.",
+      "palette": ["#00573f", "#ffffff", "#f2a900", "#eef0ee", "#14201b"],
+      "materials": ["sign-green panels", "white inset border", "Overpass (highway-sign lettering)"],
+      "viewport": "Phone: a dark board preview of green sign panels, the prayer countdown as an amber exit tag; white settings list below.",
+      "risk": "Lots of green can feel heavy at night; the inset sign border must stay one line, never grow into a costume.",
+      "html": ".impeccable/mocks/decision/safer-jkr.html",
+      "htmlFrame": "390x844"
+    },
+    {
+      "id": "safer-cabin",
+      "kind": "grounded",
+      "label": "e.MAS Cabin Calm",
+      "lineage": "the calm graphite-and-teal look of modern EV cabins",
+      "thesis": "Quiet graphite that blends into the e.MAS dashboard, with one teal charge strip that is literally your battery level.",
+      "palette": ["#2b2e33", "#e8e6e1", "#3fb8af", "#f3f3f1", "#1c1e21"],
+      "materials": ["graphite panel", "hairline dividers instead of cards", "battery as a full-width teal strip"],
+      "viewport": "Phone: a graphite board with widgets divided by hairlines and a teal battery strip along the bottom edge; light settings list below.",
+      "risk": "Closest to the dark-plus-one-accent default; its distinction rests entirely on the battery strip.",
+      "html": ".impeccable/mocks/decision/safer-cabin.html",
+      "htmlFrame": "390x844"
+    },
+    {
+      "id": "safer-masjid",
+      "kind": "grounded",
+      "label": "Masjid Stone & Teal",
+      "lineage": "limestone, deep teal and brass of Malaysian masjid interiors",
+      "thesis": "Deep teal panels with brass details; a single eight-point star marks the next prayer, nothing else is ornamented.",
+      "palette": ["#0f3d3e", "#c8a55a", "#f4efe4", "#ede6da", "#1d2423"],
+      "materials": ["deep teal panels", "brass accent", "one eight-point star (khatam) marker"],
+      "viewport": "Phone: a teal board with the star beside the next prayer and brass countdown; warm stone settings list below.",
+      "risk": "Ornament can creep; the star must stay the only motif or it turns into decoration.",
+      "html": ".impeccable/mocks/decision/safer-masjid.html",
+      "htmlFrame": "390x844"
+    }
+  ],
+  "reroll": {"registers": ["safer", "bolder"]},
+  "buildPath": {"value": "code"},
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "The category standard",
+    "thesis": "Material 3 dark, at the craft level of Android Auto's own dashboard, AutoDeck and Samsung One UI widgets.",
+    "palette": ["#121316", "#1f2024", "#a8c7fa", "#e3e2e6"],
+    "materials": ["tonal surfaces", "rounded cards", "Roboto"],
+    "viewport": "Phone: Material top bar, a rounded dark board preview, Material list settings.",
+    "risk": "Indistinguishable from AutoDeck and every Android Auto widget app, by design.",
+    "html": ".impeccable/mocks/decision/canon.html",
+    "htmlFrame": "390x844"
+  },
+  "steer": true
+}

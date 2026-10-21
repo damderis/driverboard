@@ -5,3 +5,6 @@
 local.properties
 *.iml
 .idea/
+.impeccable/review/*.xml
+.impeccable/review/*.txt
+.impeccable/decision/*.txt

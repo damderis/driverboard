@@ -1,0 +1,22 @@
+<resources>
+    <string name="board_clock">Masa</string>
+    <string name="board_next_prayer">Solat seterusnya</string>
+    <string name="board_now_playing">Sedang dimainkan</string>
+    <string name="board_battery">Bateri</string>
+    <string name="board_range_km">%1$d km</string>
+    <string name="board_updated">Dikemas kini %1$s</string>
+    <string name="board_stale">Data tersimpan</string>
+    <string name="board_no_car_data">Tiada data daripada kereta</string>
+    <string name="prayer_waiting">Menunggu waktu solat</string>
+    <string name="prayer_unavailable">Waktu solat tidak tersedia</string>
+    <string name="prayer_offline">Luar talian</string>
+    <string name="prayer_remaining">Berbaki %1$s</string>
+    <string name="prayer_tomorrow_waiting">Waktu esok selepas tengah malam</string>
+    <string name="prayer_malaysia_time">Waktu Malaysia</string>
+    <string name="battery_unsupported">Bateri kereta tidak tersedia</string>
+    <string name="media_grant_access">Benarkan akses pada telefon</string>
+    <string name="media_notification_required">Akses pemberitahuan diperlukan</string>
+    <string name="media_playing">Sedang dimainkan</string>
+    <string name="media_nothing_playing">Tiada media dimainkan</string>
+    <string name="media_start_music">Mainkan muzik pada telefon</string>
+</resources>

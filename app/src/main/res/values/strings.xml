@@ -1,0 +1,27 @@
+﻿<resources>
+<string name="app_name">DriveBoard</string>
+<string name="preview_description">DriveBoard preview. Drag to move a widget, or its bottom right corner to resize.</string>
+<string name="edit_hint">Drag to move · corner to resize · live in car</string>
+<string name="prayer_zone">Prayer zone</string>
+<string name="use_location">Use location</string>
+<string name="now_playing">Now playing</string>
+<string name="allowed">Allowed</string>
+<string name="grant">Grant</string>
+<string name="car_battery">Car battery</string>
+<string name="battery_next_drive">From the car on next drive</string>
+<string name="waiting">Waiting</string>
+<string name="colour_tone">Colour tone</string>
+<string name="language">Language</string>
+<string name="english">English</string>
+<string name="malay">Bahasa Melayu</string>
+<string name="reset_layout">Reset layout</string>
+<string name="auto_help">Enable Unknown sources in Android Auto developer settings to see DriveBoard in the car.</string>
+<string name="updated">updated %1$s</string>
+<string name="locating">Finding prayer zone…</string>
+<string name="location_unavailable">Location unavailable — pick a zone</string>
+<string-array name="tone_names"><item>Teal</item><item>Emerald</item><item>Navy</item><item>Maroon</item><item>Graphite</item></string-array>
+<string name="phone_range_km">%1$d km</string>
+<string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
+<string name="unavailable">Unavailable</string>
+<string name="no_car_data">No data from car</string>
+</resources>

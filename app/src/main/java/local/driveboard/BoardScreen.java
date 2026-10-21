@@ -19,12 +19,19 @@ import androidx.car.app.model.Action;
 import androidx.car.app.model.ActionStrip;
 import androidx.car.app.model.Template;
 import androidx.car.app.navigation.model.NavigationTemplate;
+import androidx.car.app.hardware.CarHardwareManager;
+import androidx.car.app.hardware.common.CarValue;
+import androidx.car.app.hardware.info.CarInfo;
+import androidx.car.app.hardware.info.EnergyLevel;
+import androidx.car.app.hardware.info.EnergyProfile;
+import androidx.car.app.hardware.common.OnCarDataAvailableListener;
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LifecycleEventObserver;
 
 /** Renders the same board as the phone preview into the host's navigation surface. */
 public final class BoardScreen extends Screen implements SurfaceCallback {
     private static final String TAG = "BoardScreen";
+    private static final String CAR_TAG = "DriveBoardCar";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SharedPreferences prefs;
@@ -51,6 +58,9 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
     private Rect visibleArea = new Rect();
     private Rect stableArea = new Rect();
     private boolean started;
+    private CarInfo carInfo;
+    private boolean energyListening;
+    private final OnCarDataAvailableListener<EnergyLevel> energyListener = this::onEnergyLevel;
 
     public BoardScreen(@NonNull CarContext carContext) {
         super(carContext);
@@ -69,7 +79,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
     @Override
     public Template onGetTemplate() {
         Action refresh = new Action.Builder()
-                .setTitle("Refresh")
+                .setTitle(AppLocale.wrap(getCarContext()).getString(R.string.refresh))
                 .setOnClickListener(this::drawBoard)
                 .build();
         return new NavigationTemplate.Builder()
@@ -84,6 +94,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
         started = true;
         prefs.registerOnSharedPreferenceChangeListener(prefsListener);
         getCarContext().getCarService(AppManager.class).setSurfaceCallback(this);
+        startCarEnergy();
         scheduleTick();
     }
 
@@ -95,6 +106,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
         handler.removeCallbacks(tick);
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener);
         getCarContext().getCarService(AppManager.class).setSurfaceCallback(null);
+        stopCarEnergy();
         releaseSurface();
     }
 
@@ -132,7 +144,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
     @Override
     public void onStableAreaChanged(@NonNull Rect area) {
         stableArea = new Rect(area);
-        // Track the stable region for future fixed controls; render only the visible region.
+        drawBoard();
     }
 
     @Override
@@ -162,10 +174,13 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
             return;
         }
         Rect bounds = new Rect(0, 0, width, height);
-        // Wait for the host's visible area; an empty area means there is nothing safe to draw.
+        // Some hosts do not send a visible callback. Use stable, then full surface.
         Rect drawArea = new Rect(visibleArea);
         if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
-            return;
+            drawArea.set(stableArea);
+        }
+        if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
+            drawArea.set(bounds);
         }
 
         if (prefs.getInt("visible_width", 0) != drawArea.width() || prefs.getInt("visible_height", 0) != drawArea.height()) {
@@ -181,6 +196,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
         Canvas canvas = null;
         try {
             canvas = surface.lockHardwareCanvas();
+            canvas.drawColor(Tone.current(getCarContext()).ground);
             int save = canvas.save();
             canvas.clipRect(drawArea);
             canvas.translate(drawArea.left, drawArea.top);
@@ -197,5 +213,102 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
                 }
             }
         }
+    }
+
+    private void startCarEnergy() {
+        try {
+            int level = getCarContext().getCarAppApiLevel();
+            Log.i(CAR_TAG, "Host car API level=" + level);
+            if (level < 3) {
+                Log.i(CAR_TAG, "Energy requires car API 3");
+                prefs.edit().putBoolean("battery_unsupported", true).apply();
+                return;
+            }
+            carInfo = getCarContext().getCarService(CarHardwareManager.class).getCarInfo();
+            carInfo.fetchEnergyProfile(getCarContext().getMainExecutor(), this::onEnergyProfile);
+        } catch (RuntimeException | LinkageError e) {
+            Log.w(CAR_TAG, "Energy profile unavailable", e);
+            prefs.edit().putBoolean("battery_unsupported", true).apply();
+        }
+    }
+
+    private void onEnergyProfile(EnergyProfile profile) {
+        if (!started || profile == null) {
+            return;
+        }
+        Log.i(CAR_TAG, "Energy profile fuel status=" + profile.getFuelTypes().getStatus()
+                + " value=" + profile.getFuelTypes().getValue() + " connector status="
+                + profile.getEvConnectorTypes().getStatus() + " value="
+                + profile.getEvConnectorTypes().getValue());
+        boolean electric = success(profile.getFuelTypes())
+                && profile.getFuelTypes().getValue().contains(EnergyProfile.FUEL_TYPE_ELECTRIC);
+        boolean connector = success(profile.getEvConnectorTypes())
+                && !profile.getEvConnectorTypes().getValue().isEmpty();
+        if (!electric && !connector) {
+            Log.i(CAR_TAG, "EV profile absent; energy listener not started");
+            prefs.edit().putBoolean("battery_unsupported", true).apply();
+            return;
+        }
+        try {
+            carInfo.addEnergyLevelListener(getCarContext().getMainExecutor(), energyListener);
+            energyListening = true;
+            prefs.edit().putBoolean("battery_unsupported", false).apply();
+            Log.i(CAR_TAG, "EV energy listener started");
+        } catch (RuntimeException | LinkageError e) {
+            Log.w(CAR_TAG, "Energy listener unavailable", e);
+        }
+    }
+
+    private static <T> boolean success(CarValue<T> value) {
+        return value != null && value.getStatus() == CarValue.STATUS_SUCCESS
+                && value.getValue() != null;
+    }
+
+    private void onEnergyLevel(EnergyLevel level) {
+        if (!started || level == null) {
+            return;
+        }
+        CarValue<Float> battery = level.getBatteryPercent();
+        CarValue<Float> range = level.getRangeRemainingMeters();
+        Log.i(CAR_TAG, "Energy level battery status=" + battery.getStatus() + " value="
+                + battery.getValue() + " range status=" + range.getStatus() + " value="
+                + range.getValue());
+        SharedPreferences.Editor edit = prefs.edit();
+        boolean have = false;
+        if (success(battery) && Float.isFinite(battery.getValue())
+                && battery.getValue() >= 0 && battery.getValue() <= 100) {
+            edit.putFloat("battery_pct", battery.getValue());
+            have = true;
+        } else {
+            edit.remove("battery_pct");
+        }
+        if (success(range) && Float.isFinite(range.getValue())
+                && range.getValue() >= 0 && range.getValue() <= 2_000_000) {
+            edit.putInt("range_m", Math.round(range.getValue()));
+            have = true;
+        } else {
+            edit.remove("range_m");
+        }
+        if (have) {
+            edit.putLong("battery_at", System.currentTimeMillis())
+                    .putBoolean("battery_unsupported", false).apply();
+            Log.i(CAR_TAG, "Energy level updated");
+            drawBoard();
+        } else {
+            edit.remove("battery_at").apply();
+            Log.i(CAR_TAG, "Energy level has no successful battery or range values");
+        }
+    }
+
+    private void stopCarEnergy() {
+        if (energyListening && carInfo != null) {
+            try {
+                carInfo.removeEnergyLevelListener(energyListener);
+            } catch (RuntimeException | LinkageError e) {
+                Log.w(CAR_TAG, "Could not remove energy listener", e);
+            }
+        }
+        energyListening = false;
+        carInfo = null;
     }
 }

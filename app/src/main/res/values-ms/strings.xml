@@ -1,0 +1,27 @@
+﻿<resources>
+<string name="app_name">DriveBoard</string>
+<string name="preview_description">Pratonton DriveBoard. Seret untuk mengalih widget, atau bucunya di kanan bawah untuk mengubah saiz.</string>
+<string name="edit_hint">Seret untuk alih · bucu untuk saiz · langsung di kereta</string>
+<string name="prayer_zone">Zon solat</string>
+<string name="use_location">Guna lokasi</string>
+<string name="now_playing">Sedang dimainkan</string>
+<string name="allowed">Dibenarkan</string>
+<string name="grant">Benarkan</string>
+<string name="car_battery">Bateri kereta</string>
+<string name="battery_next_drive">Daripada kereta pada perjalanan seterusnya</string>
+<string name="waiting">Menunggu</string>
+<string name="colour_tone">Tona warna</string>
+<string name="language">Bahasa</string>
+<string name="english">English</string>
+<string name="malay">Bahasa Melayu</string>
+<string name="reset_layout">Tetapkan semula susun atur</string>
+<string name="auto_help">Aktifkan Sumber tidak diketahui dalam tetapan pembangun Android Auto untuk melihat DriveBoard di kereta.</string>
+<string name="updated">dikemas kini %1$s</string>
+<string name="locating">Mencari zon solat…</string>
+<string name="location_unavailable">Lokasi tidak tersedia — pilih zon</string>
+<string-array name="tone_names"><item>Teal</item><item>Zamrud</item><item>Biru tua</item><item>Merah manggis</item><item>Grafit</item></string-array>
+<string name="phone_range_km">%1$d km</string>
+<string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
+<string name="unavailable">Tidak tersedia</string>
+<string name="no_car_data">Tiada data daripada kereta</string>
+</resources>

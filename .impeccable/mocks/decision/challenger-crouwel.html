@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--g:#f4f4f1;--ink:#111;--blue:#2b59c3;--grid:#c9d3ea}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;background:var(--g);font-family:"Schibsted Grotesk",sans-serif;color:var(--ink);
+background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32.5px 32.5px}
+.status{height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:13px;font-weight:600}
+h1{font-size:30px;font-weight:800;padding:4px 16px 12px;letter-spacing:-.03em}
+.board{margin:0 12px;height:152px;background:#fff;border:2px solid var(--ink);display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(6,1fr)}
+.c{border-right:1px solid var(--grid);border-bottom:1px solid var(--grid);padding:6px}
+.clk{grid-column:1/6;grid-row:1/7;background:var(--blue);color:#fff}
+.clk .t{font-size:50px;font-weight:800;letter-spacing:-.05em;line-height:.9;margin-top:22px}
+.clk .d{font-size:9px;margin-top:6px}
+.l{font-size:7px;font-weight:600;letter-spacing:.08em}
+.pr{grid-column:6/13;grid-row:1/4}.pr .t{font-size:22px;font-weight:800;letter-spacing:-.03em}.pr .s{font-size:9px}
+.np{grid-column:6/10;grid-row:4/7}.np .t{font-size:11px;font-weight:800;margin-top:4px}.np .s{font-size:8px}
+.bt{grid-column:10/13;grid-row:4/7}.bt .t{font-size:20px;font-weight:800}.bt .s{font-size:8px}
+.hint{font-size:12px;padding:10px 16px}
+.set{margin:4px 12px;background:#fff;border:2px solid var(--ink)}
+.r{display:grid;grid-template-columns:1fr auto;align-items:center;padding:12px;border-bottom:1px solid var(--grid);min-height:58px}
+.r:last-child{border-bottom:0}.a{font-size:15px;font-weight:800}.b{font-size:12px;color:#555}
+.btn{background:var(--blue);color:#fff;font-weight:700;font-size:13px;padding:9px 12px}
+.v{font-size:12px;font-weight:700}
+.foot{font-size:11px;padding:10px 16px;color:#444}
+</style></head><body>
+<div class="status"><span>10:27</span><span>53%</span></div>
+<h1>DriveBoard</h1>
+<div class="board">
+ <div class="c clk"><div class="l">TIME</div><div class="t">10:27</div><div class="d">Tue 21 Oct</div></div>
+ <div class="c pr"><div class="l">NEXT PRAYER</div><div class="t">Zohor 13:01</div><div class="s">in 2h 33m · WLY01</div></div>
+ <div class="c np"><div class="l">NOW PLAYING</div><div class="t">Surah Al-Mulk</div><div class="s">Mishary Alafasy</div></div>
+ <div class="c bt"><div class="l">BATTERY</div><div class="t">78%</div><div class="s">312 km</div></div>
+</div>
+<div class="hint">Snaps to 12 × 6 cells · live in car</div>
+<div class="set">
+ <div class="r"><div><div class="a">Prayer zone</div><div class="b">WLY01 · Kuala Lumpur</div></div><span class="btn">Use location</span></div>
+ <div class="r"><div><div class="a">Now playing</div><div class="b">Morphe and Quran</div></div><span class="v">Allowed</span></div>
+ <div class="r"><div><div class="a">Car battery</div><div class="b">From the car on next drive</div></div><span class="v">Waiting</span></div>
+ <div class="r"><div><div class="a">Language</div><div class="b">English · Bahasa Melayu</div></div><span class="v">English</span></div>
+</div>
+<p class="foot">Battery and track values are sample data for this sketch.</p>
+</body></html>

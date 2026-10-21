@@ -1,0 +1,8 @@
+<resources>
+    <string name="media_service_name">DriveBoard now playing</string>
+    <string name="refresh">Refresh</string>
+    <string name="prayer_countdown">in %1$dh %2$dm</string>
+    <string name="location_permission_required">Location permission required</string>
+    <string name="location_no_fix">Location unavailable</string>
+    <string name="location_lookup_failed">Zone lookup unavailable</string>
+</resources>

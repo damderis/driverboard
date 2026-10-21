@@ -1,84 +1,482 @@
 package local.driveboard;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
-import android.text.InputFilter;
+import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import java.util.Locale;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public final class MainActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private BoardView board;
-    private Button access;
-    private TextView status;
+    private static final int BRASS = 0xFFC8A55A;
+    private static final int CREAM = 0xFFF4EFE4;
+    private static final int FAINT_CREAM = 0x66F4EFE4;
+
+    private final Handler handler = new Handler();
     private final Runnable tick = new Runnable() {
-        @Override public void run() { board.refresh(); updateAccess(); handler.postDelayed(this,1000); }
+        @Override
+        public void run() {
+            board.refresh();
+            updateStates();
+            handler.postDelayed(this, 1000);
+        }
     };
-    private int dp(int n) { return Math.round(n*getResources().getDisplayMetrics().density); }
-    @Override public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(Color.rgb(9,15,25));
-        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(20),dp(20),dp(20),dp(28));
-        scroll.addView(content);
-        content.setOnApplyWindowInsetsListener((v,insets)->{
-            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
-            v.setPadding(dp(20)+bars.left,dp(20)+bars.top,dp(20)+bars.right,dp(28)+bars.bottom); return insets;
+
+    private BoardView board;
+    private TextView zoneDetail;
+    private TextView batteryDetail;
+    private TextView batteryValue;
+    private TextView allowed;
+    private Button grant;
+    private int ink;
+    private int muted;
+    private int cardColor;
+    private int hairline;
+    private int accent;
+    private String locationMessage;
+    private boolean locating;
+    private boolean night;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(AppLocale.wrap(base));
+    }
+
+    @Override
+    public void onCreate(Bundle state) {
+        super.onCreate(state);
+        build();
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private void build() {
+        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+        night = dark;
+        Tone tone = Tone.current(this);
+        accent = night ? CREAM : tone.ground;
+        ink = night ? CREAM : 0xFF1D2423;
+        muted = night ? 0xFFA9C2BD : 0xFF5F6763;
+        cardColor = night ? tone.panel : 0xFFFAF7F1;
+        hairline = night ? 0xFF46605B : 0xFFE3DCCF;
+
+        getWindow().setDecorFitsSystemWindows(false);
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        getWindow().getDecorView().getWindowInsetsController();
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(night ? tone.ground : 0xFFEDE6DA);
+        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
         });
-        TextView title = text("DriveBoard",28); title.setTextColor(0xFF88D8CF); content.addView(title);
-        content.addView(text("Your car screen, arranged on your phone",15));
-        content.addView(text("Drag cards to move · drag the mint corner to resize\n12 columns × 6 rows · overlaps allowed",14));
-        board = new BoardView(this); board.setContentDescription("DriveBoard layout preview. Drag a card to move it or its bottom right corner to resize.");
-        board.setEditing(true,()->status.setText("Layout saved · updates live in the car"));
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(180));
-        previewParams.topMargin=dp(16); previewParams.bottomMargin=dp(8); content.addView(board,previewParams);
-        board.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->updateAspect());
-        status=text("Preview uses the last car surface ratio (default 1920 × 720)",12); content.addView(status);
-        Button reset = new Button(this); reset.setText("Reset layout"); reset.setOnClickListener(v->Store.prefs(this).edit().putString("layout",BoardLayout.defaults().toJson()).apply()); content.addView(reset);
-        content.addView(text("Malaysia JAKIM zone",18));
-        EditText zone=new EditText(this); zone.setSingleLine(true); zone.setHint("WLY01"); zone.setText(WidgetData.zone(this));
-        zone.setFilters(new InputFilter[]{new InputFilter.AllCaps(),new InputFilter.LengthFilter(5)});
-        zone.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS); content.addView(zone);
-        Button save=new Button(this); save.setText("Save zone"); save.setOnClickListener(v->{
-            String z=zone.getText().toString().trim().toUpperCase(Locale.ROOT);
-            if(!z.matches("[A-Z]{3}[0-9]{2}")) { zone.setError("Enter a JAKIM zone, e.g. WLY01"); return; }
-            if (!z.equals(WidgetData.zone(this))) Store.prefs(this).edit().putString("zone",z).putLong("prayer_refresh_"+z,System.currentTimeMillis()).apply();
-            board.refresh(); status.setText("Zone saved: "+z+" · today's prayer times");
-            ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(zone.getWindowToken(),0);
-        }); content.addView(save);
-        access=new Button(this); access.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))); content.addView(access);
-        content.addView(text("Enable Unknown sources in Android Auto developer settings to see DriveBoard in the car.",14));
-        content.addView(text("Prayer times use Malaysia time. Media shows the active playing session. Car display support must be tested in a real Android Auto host.",12));
+        LinearLayout content = column();
+        content.setPadding(dp(12), dp(8), dp(12), dp(16));
+        scroll.addView(content);
+
+        addTitle(content);
+        addBoard(content, tone);
+        LinearLayout card = column();
+        card.setBackground(shape(cardColor, 14));
+        content.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        addPrayerRow(card);
+        addMediaRow(card);
+        addBatteryRow(card);
+        addToneRow(card, tone);
+        addLanguageRow(card, tone);
+        addFooter(content);
+
         setContentView(scroll);
+        getWindow().getDecorView().post(() -> getWindow().getInsetsController()
+                .setSystemBarsAppearance(dark ? 0 : 24, 24));
+        scroll.requestApplyInsets();
+        board.post(this::updateAspect);
+        updateStates();
     }
-    private TextView text(String s,int size) {
-        TextView t=new TextView(this); t.setText(s); t.setTextSize(size); t.setTextColor(0xFFD7E2EE); t.setPadding(0,dp(8),0,dp(8)); return t;
+
+    private void addTitle(LinearLayout content) {
+        TextView title = text(getString(R.string.app_name), 26, true);
+        title.setTypeface(Fonts.extraBold(this));
+        title.setTextColor(accent);
+        title.setPadding(dp(8), dp(6), dp(8), dp(14));
+        content.addView(title);
     }
-    private void updateAccess() {
-        boolean granted=WidgetData.hasMediaAccess(this);
-        access.setText(granted?"Notification access granted":"Grant notification access"); access.setVisibility(granted?View.GONE:View.VISIBLE);
+
+    private void addBoard(LinearLayout content, Tone tone) {
+        board = new BoardView(this);
+        board.setBackground(shape(tone.ground, 14));
+        board.setClipToOutline(true);
+        board.setContentDescription(getString(R.string.preview_description));
+        board.setEditing(true, () -> {});
+        content.addView(board, new LinearLayout.LayoutParams(-1, dp(150)));
+        board.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> updateAspect());
+
+        TextView hint = text(getString(R.string.edit_hint), 12, false);
+        hint.setTextColor(muted);
+        hint.setPadding(dp(8), dp(10), dp(8), dp(10));
+        content.addView(hint);
     }
+
+    private void addPrayerRow(LinearLayout card) {
+        LinearLayout prayer = row(card, false);
+        LinearLayout zone = description(prayer, R.string.prayer_zone);
+        zoneDetail = detail(zone, "");
+        prayer.setOnClickListener(view -> pickZone());
+        Button location = pill(getString(R.string.use_location));
+        location.setOnClickListener(view -> useLocation());
+        prayer.addView(location);
+    }
+
+    private void addMediaRow(LinearLayout card) {
+        LinearLayout media = row(card, true);
+        description(media, R.string.now_playing);
+        allowed = text(getString(R.string.allowed), 13, true);
+        allowed.setTextColor(accent);
+        media.addView(allowed);
+        grant = pill(getString(R.string.grant));
+        grant.setOnClickListener(view -> startActivity(
+                new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        media.addView(grant);
+    }
+
+    private void addBatteryRow(LinearLayout card) {
+        LinearLayout battery = row(card, true);
+        LinearLayout description = description(battery, R.string.car_battery);
+        batteryDetail = detail(description, getString(R.string.battery_next_drive));
+        batteryValue = text("", 13, true);
+        batteryValue.setFontFeatureSettings("tnum");
+        battery.addView(batteryValue);
+    }
+
+    private void addToneRow(LinearLayout card, Tone tone) {
+        LinearLayout colours = row(card, true);
+        colours.setOrientation(LinearLayout.VERTICAL);
+        colours.setGravity(Gravity.START);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(text(getString(R.string.colour_tone), 15, true),
+                new LinearLayout.LayoutParams(0, -2, 1));
+        TextView toneName = text(toneName(tone), 12, false);
+        toneName.setTextColor(muted);
+        heading.addView(toneName);
+        colours.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout swatches = new LinearLayout(this);
+        colours.addView(swatches, new LinearLayout.LayoutParams(-1, dp(48)));
+        for (Tone option : Tone.values()) {
+            addSwatch(swatches, option, tone);
+        }
+    }
+
+    private void addSwatch(LinearLayout swatches, Tone option, Tone tone) {
+        FrameLayout target = new FrameLayout(this);
+        target.setMinimumWidth(dp(48));
+        target.setContentDescription(toneName(option));
+        target.setSelected(option == tone);
+        View circle = new View(this);
+        GradientDrawable drawable = shape(option.ground, 24);
+        if (option == tone) {
+            drawable.setStroke(dp(3), BRASS);
+        } else if (night) {
+            drawable.setStroke(dp(1), FAINT_CREAM);
+        }
+        circle.setBackground(drawable);
+        target.addView(circle, new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER));
+        swatches.addView(target, new LinearLayout.LayoutParams(0, dp(48), 1));
+        target.setOnClickListener(view -> {
+            Store.prefs(this).edit().putString("tone", option.id).apply();
+            build();
+            board.post(this::updateAspect);
+        });
+    }
+
+    private void addLanguageRow(LinearLayout card, Tone tone) {
+        LinearLayout language = row(card, true);
+        description(language, R.string.language);
+        LinearLayout segments = new LinearLayout(this);
+        segments.setBackground(shape(hairline, 24));
+        language.addView(segments);
+        for (String lang : new String[]{"en", "ms"}) {
+            addLanguageOption(segments, lang, tone);
+        }
+    }
+
+    private void addLanguageOption(LinearLayout segments, String lang, Tone tone) {
+        Button option = new Button(this);
+        option.setText(lang.equals("en") ? "EN" : "BM");
+        option.setTextSize(13);
+        option.setTypeface(Fonts.semibold(this));
+        option.setMinWidth(0);
+        option.setMinimumWidth(dp(52));
+        option.setMinimumHeight(dp(48));
+        option.setPadding(dp(10), 0, dp(10), 0);
+        boolean selected = lang.equals(Store.prefs(this).getString("lang", "en"));
+        option.setBackground(shape(selected ? filledControlColor(tone) : Color.TRANSPARENT, 24));
+        option.setTextColor(selected ? filledControlTextColor(tone) : ink);
+        option.setContentDescription(getString(lang.equals("en")
+                ? R.string.english : R.string.malay));
+        option.setSelected(selected);
+        option.setOnClickListener(view -> {
+            Store.prefs(this).edit().putString("lang", lang).apply();
+            recreate();
+        });
+        segments.addView(option, new LinearLayout.LayoutParams(dp(54), dp(48)));
+    }
+
+    private void addFooter(LinearLayout content) {
+        TextView reset = text(getString(R.string.reset_layout), 13, false);
+        reset.setGravity(Gravity.CENTER);
+        reset.setMinHeight(dp(48));
+        reset.setTextColor(accent);
+        reset.setOnClickListener(view -> Store.prefs(this).edit()
+                .putString("layout", BoardLayout.defaults().toJson()).apply());
+        content.addView(reset, new LinearLayout.LayoutParams(-1, -2));
+        TextView help = text(getString(R.string.auto_help), 11, false);
+        help.setTextColor(muted);
+        help.setPadding(dp(8), 0, dp(8), dp(8));
+        content.addView(help);
+    }
+
+    private int filledControlColor(Tone tone) {
+        return night ? BRASS : tone.ground;
+    }
+
+    private int filledControlTextColor(Tone tone) {
+        return night ? tone.ground : Color.WHITE;
+    }
+
+    private String toneName(Tone tone) {
+        return getResources().getStringArray(R.array.tone_names)[tone.ordinal()];
+    }
+
+    private LinearLayout column() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
+    private GradientDrawable shape(int color, int radius) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radius));
+        return drawable;
+    }
+
+    private TextView text(String value, int size, boolean strong) {
+        TextView label = new TextView(this);
+        label.setText(value);
+        label.setTextSize(size);
+        label.setTextColor(ink);
+        label.setTypeface(strong ? Fonts.semibold(this) : Fonts.regular(this));
+        label.setIncludeFontPadding(false);
+        return label;
+    }
+
+    private LinearLayout row(LinearLayout card, boolean divider) {
+        if (divider) {
+            View line = new View(this);
+            line.setBackgroundColor(hairline);
+            card.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+        }
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(8), dp(14), dp(8));
+        row.setMinimumHeight(dp(64));
+        card.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        return row;
+    }
+
+    private LinearLayout description(LinearLayout row, int label) {
+        LinearLayout column = column();
+        column.setPadding(0, 0, dp(8), 0);
+        column.addView(text(getString(label), 15, true));
+        row.addView(column, new LinearLayout.LayoutParams(0, -2, 1));
+        return column;
+    }
+
+    private TextView detail(LinearLayout column, String value) {
+        TextView label = text(value, 12, false);
+        label.setTextColor(muted);
+        label.setPadding(0, dp(4), 0, 0);
+        column.addView(label);
+        return label;
+    }
+
+    private Button pill(String label) {
+        Tone tone = Tone.current(this);
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(12);
+        button.setTypeface(Fonts.semibold(this));
+        button.setTextColor(filledControlTextColor(tone));
+        button.setBackground(shape(filledControlColor(tone), 24));
+        button.setMinHeight(dp(48));
+        button.setMinimumHeight(dp(48));
+        button.setMinWidth(dp(48));
+        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setAllCaps(false);
+        return button;
+    }
+
+    private void updateStates() {
+        boolean access = WidgetData.hasMediaAccess(this);
+        allowed.setVisibility(access ? View.VISIBLE : View.GONE);
+        grant.setVisibility(access ? View.GONE : View.VISIBLE);
+        SharedPreferences prefs = Store.prefs(this);
+        zoneDetail.setText(locationMessage != null ? locationMessage
+                : WidgetData.zone(this) + " · " + WidgetData.zoneName(this));
+        long at = prefs.getLong("battery_at", 0);
+        if (at == 0) {
+            boolean unavailable = prefs.getBoolean("battery_unsupported", false);
+            batteryValue.setText(unavailable ? R.string.unavailable : R.string.waiting);
+            batteryValue.setTextColor(unavailable ? muted : night ? 0xFFE5BC6B : 0xFF8A6100);
+            batteryDetail.setText(unavailable ? R.string.no_car_data
+                    : R.string.battery_next_drive);
+            batteryDetail.setAlpha(1f);
+        } else {
+            String pct = prefs.contains("battery_pct")
+                    ? String.format(AppLocale.locale(this), "%.0f%%", prefs.getFloat("battery_pct", 0))
+                    : "—";
+            String range = prefs.contains("range_m")
+                    ? getString(R.string.phone_range_km, Math.round(prefs.getInt("range_m", 0) / 1000f))
+                    : "—";
+            String when = new SimpleDateFormat("HH:mm", AppLocale.locale(this))
+                    .format(new Date(at));
+            batteryValue.setText("");
+            batteryDetail.setText(getString(R.string.battery_summary, pct, range,
+                    System.currentTimeMillis() - at > 1800000
+                            ? getString(R.string.updated, when) : when));
+            batteryDetail.setAlpha(System.currentTimeMillis() - at > 1800000 ? .65f : 1f);
+        }
+    }
+
+    private void pickZone() {
+        ZoneCatalog.Zone[] zones = ZoneCatalog.options();
+        String[] labels = new String[zones.length];
+        for (int index = 0; index < zones.length; index++) {
+            labels[index] = zones[index].code + " · " + zones[index].name;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.prayer_zone)
+                .setItems(labels, (dialog, index) -> {
+                    locationMessage = null;
+                    Store.prefs(this).edit()
+                            .putString("zone", zones[index].code)
+                            .putString("zone_name", zones[index].name)
+                            .putLong("prayer_refresh_" + zones[index].code,
+                                    System.currentTimeMillis())
+                            .apply();
+                    board.refresh();
+                    updateStates();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void useLocation() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, 7);
+            return;
+        }
+        locate();
+    }
+
+    private void locate() {
+        if (locating) {
+            return;
+        }
+        locating = true;
+        locationMessage = getString(R.string.locating);
+        updateStates();
+        ZoneLocator.refresh(this, (success, message) -> runOnUiThread(() -> {
+            locating = false;
+            locationMessage = success ? null : getString(R.string.location_unavailable);
+            updateStates();
+            board.refresh();
+        }));
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == 7) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+                locate();
+            } else {
+                locationMessage = getString(R.string.location_unavailable);
+                updateStates();
+            }
+        }
+    }
+
     private void updateAspect() {
-        if(board.getWidth()==0) return;
-        SharedPreferences p=Store.prefs(this);
-        int width=Math.max(1,p.getInt("visible_width",p.getInt("surface_width",1920))),height=Math.max(1,p.getInt("visible_height",p.getInt("surface_height",720)));
-        int desired=Math.max(1,Math.round(board.getWidth()*(height/(float)width)));
-        if(board.getLayoutParams().height!=desired) { board.getLayoutParams().height=desired; board.requestLayout(); }
+        if (board.getWidth() == 0) {
+            return;
+        }
+        SharedPreferences prefs = Store.prefs(this);
+        int width = Math.max(1, prefs.getInt("visible_width",
+                prefs.getInt("surface_width", 1920)));
+        int height = Math.max(1, prefs.getInt("visible_height",
+                prefs.getInt("surface_height", 1080)));
+        int desired = Math.max(1, Math.round(board.getWidth() * height / (float) width));
+        if (board.getLayoutParams().height != desired) {
+            board.getLayoutParams().height = desired;
+            board.requestLayout();
+        }
     }
-    @Override protected void onStart() { super.onStart(); Store.prefs(this).registerOnSharedPreferenceChangeListener(this); handler.post(tick); board.post(this::updateAspect); }
-    @Override protected void onStop() { handler.removeCallbacks(tick); Store.prefs(this).unregisterOnSharedPreferenceChangeListener(this); super.onStop(); }
-    @Override public void onSharedPreferenceChanged(SharedPreferences prefs,String key) {
-        handler.post(()->{ board.refresh(); if("surface_width".equals(key)||"surface_height".equals(key)||"visible_width".equals(key)||"visible_height".equals(key)) updateAspect(); });
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Store.prefs(this).registerOnSharedPreferenceChangeListener(this);
+        handler.post(tick);
+        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+                && System.currentTimeMillis()
+                - Store.prefs(this).getLong("zone_checked_at", 0) > 43200000) {
+            locate();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        handler.removeCallbacks(tick);
+        Store.prefs(this).unregisterOnSharedPreferenceChangeListener(this);
+        super.onStop();
+    }
+
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
+        handler.post(() -> {
+            board.refresh();
+            updateStates();
+            updateAspect();
+        });
     }
 }
