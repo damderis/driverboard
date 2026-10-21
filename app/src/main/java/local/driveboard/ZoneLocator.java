@@ -30,17 +30,22 @@ public final class ZoneLocator {
         void onResult(boolean success, String message);
     }
 
-    public static void refresh(Context context, Callback callback) {
+    public interface CoordinatesCallback {
+        /** Called on the main thread. Null means no recent coarse phone fix is available. */
+        void onCoordinates(Location location);
+    }
+
+    /** Obtain only a coarse phone network fix; never consult the car location provider. */
+    public static void coordinates(Context context, CoordinatesCallback callback) {
         Context app = context.getApplicationContext();
         if (app.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
-            callback.onResult(false,
-                    AppLocale.wrap(app).getString(R.string.location_permission_required));
+            MAIN.post(() -> callback.onCoordinates(null));
             return;
         }
         LocationManager manager = app.getSystemService(LocationManager.class);
         if (manager == null) {
-            callback.onResult(false, AppLocale.wrap(app).getString(R.string.location_no_fix));
+            MAIN.post(() -> callback.onCoordinates(null));
             return;
         }
         Location last = null;
@@ -55,7 +60,7 @@ public final class ZoneLocator {
         final Runnable timeout = () -> {
             if (resolved.compareAndSet(false, true)) {
                 signal.cancel();
-                resolve(app, fallback, callback);
+                callback.onCoordinates(recent(fallback));
             }
         };
         MAIN.postDelayed(timeout, 15000);
@@ -64,23 +69,48 @@ public final class ZoneLocator {
                     app.getMainExecutor(), location -> {
                 if (resolved.compareAndSet(false, true)) {
                     MAIN.removeCallbacks(timeout);
-                    resolve(app, location != null ? location : fallback, callback);
+                    callback.onCoordinates(recent(location != null ? location : fallback));
                 }
             });
         } catch (RuntimeException e) {
             Log.w(TAG, "Current network location unavailable", e);
             if (resolved.compareAndSet(false, true)) {
                 MAIN.removeCallbacks(timeout);
-                resolve(app, fallback, callback);
+                MAIN.post(() -> callback.onCoordinates(recent(fallback)));
             }
         }
     }
 
-    private static void resolve(Context app, Location location, Callback callback) {
+    private static Location recent(Location location) {
         long ageNanos = location == null ? Long.MAX_VALUE
                 : android.os.SystemClock.elapsedRealtimeNanos() - location.getElapsedRealtimeNanos();
-        if (location == null || ageNanos < 0 || ageNanos > 12L * 60 * 60 * 1_000_000_000L
-                || !validCoordinates(location.getLatitude(), location.getLongitude())) {
+        return location != null && ageNanos >= 0 && ageNanos <= 12L * 60 * 60 * 1_000_000_000L
+                && Double.isFinite(location.getLatitude())
+                && Double.isFinite(location.getLongitude())
+                && Math.abs(location.getLatitude()) <= 90
+                && Math.abs(location.getLongitude()) <= 180
+                ? location : null;
+    }
+
+    public static void refresh(Context context, Callback callback) {
+        Context app = context.getApplicationContext();
+        if (app.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            callback.onResult(false,
+                    AppLocale.wrap(app).getString(R.string.location_permission_required));
+            return;
+        }
+        coordinates(app, location -> {
+            if (location == null) {
+                callback.onResult(false, AppLocale.wrap(app).getString(R.string.location_no_fix));
+            } else {
+                resolve(app, location, callback);
+            }
+        });
+    }
+
+    private static void resolve(Context app, Location location, Callback callback) {
+        if (!validCoordinates(location.getLatitude(), location.getLongitude())) {
             callback.onResult(false, AppLocale.wrap(app).getString(R.string.location_no_fix));
             return;
         }

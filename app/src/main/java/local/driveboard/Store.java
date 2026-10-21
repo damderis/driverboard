@@ -17,17 +17,18 @@ public final class Store {
 
     public static BoardLayout layout(Context context, String mode) {
         SharedPreferences p = prefs(context);
-        if (SPLIT.equals(mode)) {
-            return BoardLayout.fromSaved(p.getString(layoutKey(mode), null),
-                    p.getString("layout", null), true);
-        }
         String saved = p.getString(layoutKey(mode), null);
         String legacy = p.getString("layout", null);
-        if (saved == null && p.contains("layout")) {
-            p.edit().putString(layoutKey(mode),
-                    BoardLayout.fromSaved(saved, legacy, false).toJson())
-                    .remove("layout").apply();
+        boolean split = SPLIT.equals(mode);
+        BoardLayout layout = BoardLayout.fromSaved(saved, legacy, split);
+        boolean legacyFull = !split && saved == null && p.contains("layout");
+        if (legacyFull || (saved != null && saved.contains("\"battery\""))) {
+            SharedPreferences.Editor edit = p.edit().putString(layoutKey(mode), layout.toJson());
+            if (legacyFull) {
+                edit.remove("layout");
+            }
+            edit.apply();
         }
-        return BoardLayout.fromSaved(saved, legacy, false);
+        return layout;
     }
 }

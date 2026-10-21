@@ -79,8 +79,17 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
 
     private BoardView board;
     private TextView zoneDetail;
-    private TextView batteryDetail;
-    private TextView batteryValue;
+    private static final String DASH = "\u2014";
+    private TextView weatherDetail;
+    private TextView weatherValue;
+    private final WeatherRepository.Callback weatherCallback = snapshot -> runOnUiThread(() -> {
+        if (board != null) {
+            board.refresh();
+        }
+        if (weatherDetail != null) {
+            updateStates();
+        }
+    });
     private TextView allowed;
     private MaterialButton grant;
     private int ink;
@@ -180,7 +189,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         content.addView(settingsCard, new LinearLayout.LayoutParams(-1, -2));
         addPrayerRow(card);
         addMediaRow(card);
-        addBatteryRow(card);
+        addWeatherRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
         addLanguageRow(card);
@@ -337,13 +346,13 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         media.addView(grant);
     }
 
-    private void addBatteryRow(LinearLayout card) {
-        LinearLayout battery = row(card, true);
-        LinearLayout description = description(battery, R.string.car_battery);
-        batteryDetail = detail(description, getString(R.string.battery_next_drive));
-        batteryValue = text("", 13, true);
-        batteryValue.setFontFeatureSettings("tnum");
-        battery.addView(batteryValue);
+    private void addWeatherRow(LinearLayout card) {
+        LinearLayout weather = row(card, true);
+        LinearLayout description = description(weather, R.string.weather);
+        weatherDetail = detail(description, DASH);
+        weatherValue = text(DASH, 13, true);
+        weatherValue.setFontFeatureSettings("tnum");
+        weather.addView(weatherValue);
     }
 
     private void addBackgroundRow(LinearLayout card) {
@@ -677,36 +686,20 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         }
         zoneDetail.setText(locationMessage != null ? locationMessage
                 : WidgetData.zone(this) + " · " + WidgetData.zoneName(this));
-        long at = prefs.getLong("battery_at", 0);
-        if (at == 0) {
-            WidgetData.BatterySnapshot battery = WidgetData.battery(this);
-            boolean unavailable = "unsupported".equals(battery.status);
-            batteryValue.setText(unavailable ? R.string.unavailable : R.string.waiting);
-            batteryValue.setTextColor(unavailable ? muted : night ? 0xFFE5BC6B : 0xFF8A6100);
-            batteryDetail.setText(WidgetData.batteryReason(this, battery.reason, false));
-            batteryDetail.setAlpha(1f);
-            batteryDetail.setTextColor(muted);
-        } else {
-            String pct = prefs.contains("battery_pct")
-                    ? String.format(AppLocale.locale(this), "%.0f%%", prefs.getFloat("battery_pct", 0))
-                    : "—";
-            String range = prefs.contains("range_m")
-                    ? getString(R.string.phone_range_km, Math.round(prefs.getInt("range_m", 0) / 1000f))
-                    : "—";
-            String when = new SimpleDateFormat("HH:mm", AppLocale.locale(this))
-                    .format(new Date(at));
-            batteryValue.setText("");
-            String summary = getString(R.string.battery_summary, pct, range,
-                    System.currentTimeMillis() - at > 1800000
-                            ? getString(R.string.updated, when) : when);
-            String reason = prefs.getString("battery_reason", "ok");
-            if (!"ok".equals(reason) && !"waiting".equals(reason)) {
-                summary += "\n" + WidgetData.batteryReason(this, reason, false);
-            }
-            batteryDetail.setText(summary);
-            batteryDetail.setAlpha(1f);
-            batteryDetail.setTextColor(muted);
-        }
+        WeatherRepository.Snapshot weather = WeatherRepository.snapshot(this);
+        boolean valid = weather != null && !Double.isNaN(weather.tempC);
+        boolean stale = valid && weather.observedAtMillis > 0
+                && System.currentTimeMillis() - weather.observedAtMillis > 60 * 60 * 1000L;
+        weatherValue.setText(valid ? Math.round(weather.tempC) + "°" : DASH);
+        weatherValue.setTextColor(stale ? muted : ink);
+        String place = weather == null || weather.place == null || weather.place.isEmpty()
+                ? DASH : weather.place;
+        String when = weather == null || weather.observedAtMillis <= 0 ? DASH
+                : new SimpleDateFormat("HH:mm", AppLocale.locale(this))
+                        .format(new Date(weather.observedAtMillis));
+        weatherDetail.setText(weather == null ? DASH
+                : getString(R.string.weather_place_updated, place, when));
+        weatherDetail.setTextColor(muted);
     }
 
     private void pickZone() {
@@ -788,6 +781,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     protected void onStart() {
         super.onStart();
         Store.prefs(this).registerOnSharedPreferenceChangeListener(this);
+        WeatherRepository.start(this, weatherCallback);
         handler.post(tick);
         if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED
@@ -800,6 +794,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     @Override
     protected void onStop() {
         handler.removeCallbacks(tick);
+        WeatherRepository.stop(weatherCallback);
         Store.prefs(this).unregisterOnSharedPreferenceChangeListener(this);
         super.onStop();
     }

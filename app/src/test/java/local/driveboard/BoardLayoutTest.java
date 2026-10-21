@@ -29,13 +29,13 @@ public class BoardLayoutTest {
     @Test
     public void defaultHasFourCardsInRequestedGrid() {
         BoardLayout b = BoardLayout.defaults();
-        assertEquals("clock:0,0,4,6;prayer:4,0,8,3;media:4,3,5,3;battery:9,3,3,3", positions(b));
+        assertEquals("clock:0,0,4,6;prayer:4,0,8,3;media:4,3,5,3;weather:9,3,3,3", positions(b));
     }
 
     @Test
     public void splitDefaultAndSavedLayoutsStayIndependent() {
         BoardLayout split = BoardLayout.splitDefaults();
-        assertEquals("prayer:0,0,12,3;clock:0,3,6,3;battery:6,3,6,3",
+        assertEquals("prayer:0,0,12,3;clock:0,3,6,3;weather:6,3,6,3",
                 positions(split));
         BoardLayout.Card clock = split.cards.get(1);
         split.move(clock, 2, 3);
@@ -70,7 +70,7 @@ public class BoardLayoutTest {
         custom.cards.add(new BoardLayout.Card("media", 4, 3, 5, 3));
         BoardLayout migrated = BoardLayout.fromJson(custom.toJson());
         assertEquals(4, migrated.cards.size());
-        assertEquals("battery:9,3,3,3", position(migrated.cards.get(3)));
+        assertEquals("weather:9,3,3,3", position(migrated.cards.get(3)));
         for (int i = 0; i < 3; i++) {
             assertEquals(position(custom.cards.get(i)), position(migrated.cards.get(i)));
         }
@@ -82,6 +82,22 @@ public class BoardLayoutTest {
                 + "{\"type\":\"clock\",\"col\":4,\"row\":0,\"w\":4,\"h\":6}]";
         assertEquals(BoardLayout.defaults().toJson(), BoardLayout.fromJson(duplicate).toJson());
         assertEquals(BoardLayout.defaults().toJson(), BoardLayout.fromJson("[]").toJson());
+    }
+
+    @Test
+    public void migratesBatteryInFullAndSplitWithoutMovingOrResizing() {
+        for (boolean split : new boolean[] {false, true}) {
+            BoardLayout saved = split ? BoardLayout.splitDefaults() : BoardLayout.defaults();
+            BoardLayout.Card weather = saved.cards.get(saved.cards.size() - 1);
+            saved.move(weather, 5, 1);
+            saved.resize(weather, 4, 4);
+            String legacy = saved.toJson().replace("weather", "battery");
+            assertEquals(saved.toJson(), BoardLayout.fromJson(legacy, split).toJson());
+            assertEquals(saved.toJson(), BoardLayout.fromSaved(legacy, null, split).toJson());
+            if (!split) {
+                assertEquals(saved.toJson(), BoardLayout.fromSaved(null, legacy, false).toJson());
+            }
+        }
     }
 
     private static String positions(BoardLayout b) {

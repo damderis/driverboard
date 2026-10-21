@@ -35,10 +35,11 @@ public final class BoardView extends View {
     private static final String DASH = "\u2014";
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint weatherIconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private BoardLayout layout = BoardLayout.defaults();
     private String mode = Store.FULL;
     private WidgetData.PrayerSnapshot prayer;
-    private WidgetData.BatterySnapshot battery;
+    private WeatherRepository.Snapshot weather;
     private WidgetData.MediaSnapshot media;
     private String time = DASH;
     private String date = DASH;
@@ -334,7 +335,7 @@ public final class BoardView extends View {
         time = android.text.format.DateFormat.getTimeFormat(words).format(now);
         date = new SimpleDateFormat("EEE d MMM", AppLocale.locale(getContext())).format(now);
         prayer = WidgetData.prayerSnapshot(words);
-        battery = WidgetData.battery(words);
+        weather = WeatherRepository.snapshot(words);
         media = WidgetData.mediaSnapshot(words);
         background = BackgroundStore.load(getContext());
         colours = BoardColours.current(getContext(), media == null ? null : media.art);
@@ -637,7 +638,7 @@ public final class BoardView extends View {
             drawPrayer(canvas, content, c.h);
         } else if ("media".equals(c.type)) {
             drawMedia(canvas, content);
-        } else if ("battery".equals(c.type)) {
+        } else if ("weather".equals(c.type)) {
             float aspect = r.width() / r.height();
             if (aspect > .75f && aspect < 1.4f) {
                 // Keep text inside the circle's inscribed square, with padding.
@@ -646,7 +647,7 @@ public final class BoardView extends View {
                 content = new RectF(r.centerX() - half, r.centerY() - half,
                         r.centerX() + half, r.centerY() + half);
             }
-            drawBattery(canvas, content);
+            drawWeather(canvas, content);
         }
         if (editing) {
             drawHandle(canvas, r);
@@ -818,7 +819,7 @@ public final class BoardView extends View {
     private Path cardPath(String type, RectF bounds) {
         Path path = new Path();
         float radius = Math.min(bounds.width(), bounds.height());
-        if ("battery".equals(type)) {
+        if ("weather".equals(type)) {
             float aspect = bounds.width() / bounds.height();
             if (aspect > .75f && aspect < 1.4f) {
                 float half = radius / 2f;
@@ -1516,55 +1517,167 @@ public final class BoardView extends View {
         }
     }
 
-    private void drawBattery(Canvas canvas, RectF r) {
-        boolean stale = battery != null && "stale".equals(battery.status);
-        boolean valid = battery != null && battery.percent >= 0;
-        String value = valid ? battery.percent + "%" : DASH;
-        String range = battery != null && battery.rangeMeters >= 0
-                ? words.getString(R.string.board_range_km,
-                        Math.round(battery.rangeMeters / 1000f))
-                : valid ? DASH : battery == null
-                        ? words.getString(R.string.board_no_car_data)
-                        : battery.shortReason(words);
-        float secondary = Math.min(14f * unit(), r.height() * .18f);
-        float size = fit(value, Math.min((valid ? 32f : 18f) * unit(),
-                r.height() * (valid ? .40f : .18f)), r.width(),
-                Fonts.regular(getContext()));
-        TextPaint labelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        labelPaint.setTypeface(Fonts.regular(getContext()));
-        Fonts.cardText(labelPaint);
-        labelPaint.setTextSize(secondary);
-        labelPaint.setColor(SAGE);
-        StaticLayout label = StaticLayout.Builder.obtain(range, 0, range.length(),
-                        labelPaint, Math.max(1, (int) r.width()))
-                .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                .setIncludePad(false)
-                .setMaxLines(2)
-                .setEllipsize(TextUtils.TruncateAt.END)
-                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
-                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
-                .build();
-        paint.setTypeface(Fonts.regular(getContext()));
-        Fonts.cardText(paint);
-        paint.setTextSize(size);
-        Paint.FontMetrics metrics = paint.getFontMetrics();
-        float valueHeight = metrics.descent - metrics.ascent;
-        float gap = secondary * .35f;
-        float updatedHeight = stale ? secondary * 1.1f : 0;
-        float blockHeight = valueHeight + gap + label.getHeight() + updatedHeight;
-        float top = r.centerY() - blockHeight / 2f;
-        centeredText(canvas, value, r.centerX(), top - metrics.ascent, size,
-                stale ? DIM : CREAM, Fonts.regular(getContext()), r.width());
-        canvas.save();
-        canvas.translate(r.left, top + valueHeight + gap);
-        label.draw(canvas);
-        canvas.restore();
-        if (stale && battery.updated != null && !battery.updated.isEmpty()) {
-            String updated = words.getString(R.string.board_updated, battery.updated);
-            centeredText(canvas, updated, r.centerX(), top + blockHeight,
-                    Math.min(10f * unit(), secondary * .75f), DIM,
+    private void drawWeather(Canvas canvas, RectF r) {
+        boolean valid = weather != null && !Double.isNaN(weather.tempC);
+        boolean stale = valid && weather.observedAtMillis > 0
+                && System.currentTimeMillis() - weather.observedAtMillis > 60 * 60 * 1000L;
+        float center = r.centerX();
+        float iconSize = Math.min(r.width() * .34f, r.height() * .29f);
+        float iconTop = r.top + r.height() * (stale ? .06f : .09f);
+        if (valid) {
+            canvas.save();
+            if (stale) {
+                canvas.saveLayerAlpha(r, 160);
+            }
+            drawWeatherIcon(canvas, center, iconTop + iconSize / 2f, iconSize,
+                    weather.weatherCode, weather.isDay);
+            String temperature = Math.round(weather.tempC) + "°";
+            float size = Math.min(34f * unit(), r.height() * .29f);
+            centeredText(canvas, temperature, center,
+                    r.top + r.height() * .59f, size, colours.onSurface,
+                    Fonts.semibold(getContext()), r.width());
+            centeredText(canvas, weatherCondition(weather.weatherCode), center,
+                    r.top + r.height() * .76f,
+                    Math.min(13f * unit(), r.height() * .14f), colours.onSurface,
+                    Fonts.regular(getContext()), r.width());
+            String rain = weather.rainProbability < 0 ? DASH
+                    : weather.rainProbability + "%";
+            centeredText(canvas, words.getString(R.string.weather_rain, rain), center,
+                    r.top + r.height() * (stale ? .85f : .91f),
+                    Math.min(11f * unit(), r.height() * .12f), colours.primary,
+                    Fonts.regular(getContext()), r.width());
+            if (stale) {
+                canvas.restore();
+            }
+            canvas.restore();
+        } else {
+            centeredText(canvas, DASH, center, r.centerY() + r.height() * .1f,
+                    Math.min(32f * unit(), r.height() * .35f), colours.onSurface,
                     Fonts.regular(getContext()), r.width());
         }
+        if (stale) {
+            String updated = words.getString(R.string.updated,
+                    new SimpleDateFormat("HH:mm", AppLocale.locale(getContext()))
+                            .format(new Date(weather.observedAtMillis)));
+            centeredText(canvas, updated, center, r.top + r.height() * .97f,
+                    Math.min(9f * unit(), r.height() * .09f), colours.onSurfaceVariant,
+                    Fonts.regular(getContext()), r.width());
+        }
+    }
+
+    private String weatherCondition(int code) {
+        int label;
+        switch (WeatherCode.kind(code)) {
+            case CLEAR:
+                label = R.string.weather_clear;
+                break;
+            case CLOUDY:
+                label = R.string.weather_cloudy;
+                break;
+            case PARTLY_CLOUDY:
+                label = R.string.weather_partly_cloudy;
+                break;
+            case FOG:
+                label = R.string.weather_fog;
+                break;
+            case DRIZZLE:
+                label = R.string.weather_drizzle;
+                break;
+            case RAIN:
+                label = R.string.weather_rainy;
+                break;
+            case SNOW:
+                label = R.string.weather_snow;
+                break;
+            case STORM:
+                label = R.string.weather_thunder;
+                break;
+            default:
+                return DASH;
+        }
+        return words.getString(label);
+    }
+
+    private void drawWeatherIcon(Canvas canvas, float cx, float cy, float size,
+            int code, boolean day) {
+        Paint icon = weatherIconPaint;
+        canvas.save();
+        canvas.translate(cx - size / 2f, cy - size / 2f);
+        canvas.scale(size / 100f, size / 100f);
+        icon.setStyle(Paint.Style.STROKE);
+        icon.setStrokeCap(Paint.Cap.ROUND);
+        icon.setStrokeJoin(Paint.Join.ROUND);
+        icon.setStrokeWidth(6f);
+        icon.setColor(colours.primary);
+        WeatherCode.Kind kind = WeatherCode.kind(code);
+        boolean cloudy = kind != WeatherCode.Kind.CLEAR;
+        if (!cloudy || kind == WeatherCode.Kind.PARTLY_CLOUDY) {
+            if (!WeatherCode.isNightVariant(code, day)) {
+                Path sun = new Path();
+                float x = cloudy ? 35f : 50f;
+                float y = cloudy ? 36f : 50f;
+                sun.addCircle(x, y, 17f, Path.Direction.CW);
+                for (int i = 0; i < 8; i++) {
+                    double angle = i * Math.PI / 4;
+                    float dx = (float) Math.cos(angle);
+                    float dy = (float) Math.sin(angle);
+                    sun.moveTo(x + dx * 25f, y + dy * 25f);
+                    sun.lineTo(x + dx * 32f, y + dy * 32f);
+                }
+                canvas.drawPath(sun, icon);
+            } else {
+                Path moon = new Path();
+                moon.addCircle(cloudy ? 35f : 50f, cloudy ? 36f : 50f,
+                        24f, Path.Direction.CW);
+                Path cutout = new Path();
+                cutout.addCircle(cloudy ? 45f : 62f, cloudy ? 26f : 38f,
+                        22f, Path.Direction.CW);
+                moon.op(cutout, Path.Op.DIFFERENCE);
+                icon.setStyle(Paint.Style.FILL);
+                canvas.drawPath(moon, icon);
+                icon.setStyle(Paint.Style.STROKE);
+            }
+        }
+        if (cloudy) {
+            icon.setColor(colours.onSurface);
+            Path cloud = new Path();
+            cloud.moveTo(22f, 66f);
+            cloud.cubicTo(7f, 65f, 8f, 48f, 23f, 46f);
+            cloud.cubicTo(27f, 25f, 54f, 26f, 62f, 43f);
+            cloud.cubicTo(84f, 39f, 93f, 65f, 76f, 70f);
+            cloud.lineTo(24f, 70f);
+            canvas.drawPath(cloud, icon);
+        }
+        if (kind == WeatherCode.Kind.FOG) {
+            icon.setColor(colours.primary);
+            Path fog = new Path();
+            fog.moveTo(25f, 80f);
+            fog.lineTo(75f, 80f);
+            fog.moveTo(34f, 91f);
+            fog.lineTo(68f, 91f);
+            canvas.drawPath(fog, icon);
+        }
+        if (kind == WeatherCode.Kind.STORM) {
+            icon.setColor(colours.primary);
+            Path bolt = new Path();
+            bolt.moveTo(52f, 73f);
+            bolt.lineTo(43f, 87f);
+            bolt.lineTo(54f, 85f);
+            bolt.lineTo(47f, 99f);
+            canvas.drawPath(bolt, icon);
+        } else if (kind == WeatherCode.Kind.DRIZZLE || kind == WeatherCode.Kind.RAIN) {
+            icon.setColor(colours.primary);
+            Path rain = new Path();
+            rain.moveTo(36f, 77f);
+            rain.cubicTo(31f, 84f, 27f, 91f, 32f, 93f);
+            rain.cubicTo(39f, 95f, 41f, 88f, 36f, 77f);
+            rain.moveTo(58f, 77f);
+            rain.cubicTo(53f, 84f, 49f, 91f, 54f, 93f);
+            rain.cubicTo(61f, 95f, 63f, 88f, 58f, 77f);
+            icon.setStyle(Paint.Style.FILL);
+            canvas.drawPath(rain, icon);
+        }
+        canvas.restore();
     }
 
     /** Wrap at a word boundary; only an oversized first word may split. */

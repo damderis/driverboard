@@ -7,9 +7,18 @@
 <string name="now_playing">Now playing</string>
 <string name="allowed">Allowed</string>
 <string name="grant">Grant</string>
-<string name="car_battery">Car battery</string>
-<string name="battery_next_drive">From the car on next drive</string>
-<string name="waiting">Waiting</string>
+<string name="weather">Weather</string>
+<string name="weather_your_location">Your location</string>
+<string name="weather_place_updated">%1$s · updated %2$s</string>
+<string name="weather_rain">Rain %1$s in 1 h</string>
+<string name="weather_clear">Clear</string>
+<string name="weather_cloudy">Cloudy</string>
+<string name="weather_partly_cloudy">Partly cloudy</string>
+<string name="weather_fog">Fog</string>
+<string name="weather_drizzle">Drizzle</string>
+<string name="weather_rainy">Rain</string>
+<string name="weather_snow">Snow</string>
+<string name="weather_thunder">Thunderstorm</string>
 <string name="language">Language</string>
 <string name="english">English</string>
 <string name="malay">Bahasa Melayu</string>
@@ -18,13 +27,4 @@
 <string name="updated">updated %1$s</string>
 <string name="locating">Finding prayer zone…</string>
 <string name="location_unavailable">Location unavailable — pick a zone</string>
-<string name="phone_range_km">%1$d km</string>
-<string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
-<string name="unavailable">Unavailable</string>
-<string name="no_car_data">No data from car</string>
-<string name="battery_reason_permission">Car data permission was denied. Allow it in Android Auto to show battery and range.</string>
-<string name="battery_reason_not_electric">This car did not report an electric battery.</string>
-<string name="battery_reason_not_sharing">This car is not sharing battery or range data with Android Auto.</string>
-<string name="battery_reason_ok">Waiting for a battery reading from the car.</string>
-<string name="battery_reason_waiting">Connect to your car to check battery and range.</string>
 </resources>

@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 public final class BoardLayout {
     public static final int COLS = 12;
     public static final int ROWS = 6;
-    public static final String[] TYPES = {"clock", "prayer", "media", "battery"};
+    public static final String[] TYPES = {"clock", "prayer", "media", "weather"};
     public static final class Card {
         public final String type;
         public int col;
@@ -51,7 +51,7 @@ public final class BoardLayout {
         b.cards.add(new Card("clock", 0, 0, 4, 6));
         b.cards.add(new Card("prayer", 4, 0, 8, 3));
         b.cards.add(new Card("media", 4, 3, 5, 3));
-        b.cards.add(new Card("battery", 9, 3, 3, 3));
+        b.cards.add(new Card("weather", 9, 3, 3, 3));
         return b;
     }
 
@@ -59,7 +59,7 @@ public final class BoardLayout {
         BoardLayout b = new BoardLayout();
         b.cards.add(new Card("prayer", 0, 0, 12, 3));
         b.cards.add(new Card("clock", 0, 3, 6, 3));
-        b.cards.add(new Card("battery", 6, 3, 6, 3));
+        b.cards.add(new Card("weather", 6, 3, 6, 3));
         return b;
     }
 
@@ -89,12 +89,12 @@ public final class BoardLayout {
         if (json == null) {
             return split ? splitDefaults() : defaults();
         }
-        Pattern p = Pattern.compile("\\{\\s*\"type\"\\s*:\\s*\"(clock|prayer|media|battery)\"\\s*,\\s*\"col\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"row\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"w\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"h\"\\s*:\\s*(-?\\d+)\\s*\\}");
+        Pattern p = Pattern.compile("\\{\\s*\"type\"\\s*:\\s*\"(clock|prayer|media|weather|battery)\"\\s*,\\s*\"col\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"row\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"w\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"h\"\\s*:\\s*(-?\\d+)\\s*\\}");
         BoardLayout b = new BoardLayout();
         Matcher m = p.matcher(json);
         try {
             while (m.find()) {
-                String type = m.group(1);
+                String type = "battery".equals(m.group(1)) ? "weather" : m.group(1);
                 for (Card c : b.cards) {
                     if (c.type.equals(type)) {
                         return split ? splitDefaults() : defaults();
@@ -110,13 +110,13 @@ public final class BoardLayout {
         if (split) {
             boolean prayer = false;
             boolean clock = false;
-            boolean battery = false;
+            boolean weather = false;
             for (Card c : b.cards) {
                 prayer |= "prayer".equals(c.type);
                 clock |= "clock".equals(c.type);
-                battery |= "battery".equals(c.type);
+                weather |= "weather".equals(c.type);
             }
-            return b.cards.size() == 3 && prayer && clock && battery
+            return b.cards.size() == 3 && prayer && clock && weather
                     ? b : splitDefaults();
         }
         if (b.cards.size() == 4) {
@@ -139,7 +139,7 @@ public final class BoardLayout {
         if (isOldDefault(b)) {
             return defaults();
         }
-        // Older layouts had no battery. Keep every saved card in place and use any
+        // Older layouts had no weather. Keep every saved card in place and use any
         // available 3x3 region; overlapping the smallest area is the last resort.
         Card best = null;
         int leastOverlap = Integer.MAX_VALUE;
@@ -155,7 +155,7 @@ public final class BoardLayout {
                 }
                 if (overlap < leastOverlap) {
                     leastOverlap = overlap;
-                    best = new Card("battery", col, row, 3, 3);
+                    best = new Card("weather", col, row, 3, 3);
                 }
             }
         }

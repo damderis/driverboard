@@ -4,11 +4,8 @@
     <string name="board_clock">Time</string>
     <string name="board_next_prayer">Next prayer</string>
     <string name="board_now_playing">Now playing</string>
-    <string name="board_battery">Battery</string>
-    <string name="board_range_km">%1$d km</string>
     <string name="board_updated">Updated %1$s</string>
     <string name="board_stale">Cached</string>
-    <string name="board_no_car_data">No car data</string>
     <string name="board_imminent_minutes">in %1$dm</string>
     <string name="prayer_waiting">Waiting for prayer times</string>
     <string name="prayer_unavailable">Prayer times unavailable</string>
@@ -16,12 +13,6 @@
     <string name="prayer_remaining">%1$s remaining</string>
     <string name="prayer_tomorrow_waiting">Tomorrow’s times after midnight</string>
     <string name="prayer_malaysia_time">Malaysia time</string>
-    <string name="battery_unsupported">Car battery unavailable</string>
-    <string name="battery_reason_permission_short">Permission needed</string>
-    <string name="battery_reason_not_electric_short">Not an EV</string>
-    <string name="battery_reason_not_sharing_short">Not shared by car</string>
-    <string name="battery_reason_ok_short">Waiting…</string>
-    <string name="battery_reason_waiting_short">Not connected</string>
     <string name="media_grant_access">Grant access on phone</string>
     <string name="media_notification_required">Notification access required</string>
     <string name="media_playing">Playing</string>

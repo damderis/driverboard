@@ -20,6 +20,8 @@ public final class CarDiagnostics extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Store.prefs(this).edit().remove("battery_pct").remove("range_m")
+                .remove("battery_at").remove("battery_reason").remove("battery_unsupported").apply();
         install(this);
     }
 

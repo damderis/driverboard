@@ -7,9 +7,18 @@
 <string name="now_playing">Sedang dimainkan</string>
 <string name="allowed">Dibenarkan</string>
 <string name="grant">Benarkan</string>
-<string name="car_battery">Bateri kereta</string>
-<string name="battery_next_drive">Daripada kereta pada perjalanan seterusnya</string>
-<string name="waiting">Menunggu</string>
+<string name="weather">Cuaca</string>
+<string name="weather_your_location">Lokasi anda</string>
+<string name="weather_place_updated">%1$s · dikemas kini %2$s</string>
+<string name="weather_rain">Hujan %1$s dalam 1 jam</string>
+<string name="weather_clear">Cerah</string>
+<string name="weather_cloudy">Berawan</string>
+<string name="weather_partly_cloudy">Separa berawan</string>
+<string name="weather_fog">Berkabus</string>
+<string name="weather_drizzle">Gerimis</string>
+<string name="weather_rainy">Hujan</string>
+<string name="weather_snow">Salji</string>
+<string name="weather_thunder">Ribut petir</string>
 <string name="language">Bahasa</string>
 <string name="english">English</string>
 <string name="malay">Bahasa Melayu</string>
@@ -18,13 +27,4 @@
 <string name="updated">dikemas kini %1$s</string>
 <string name="locating">Mencari zon solat…</string>
 <string name="location_unavailable">Lokasi tidak tersedia — pilih zon</string>
-<string name="phone_range_km">%1$d km</string>
-<string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
-<string name="unavailable">Tidak tersedia</string>
-<string name="no_car_data">Tiada data daripada kereta</string>
-<string name="battery_reason_permission">Kebenaran data kereta ditolak. Benarkan dalam Android Auto untuk melihat bateri dan jarak.</string>
-<string name="battery_reason_not_electric">Kereta ini tidak melaporkan bateri elektrik.</string>
-<string name="battery_reason_not_sharing">Kereta ini tidak berkongsi data bateri atau jarak dengan Android Auto.</string>
-<string name="battery_reason_ok">Menunggu bacaan bateri daripada kereta.</string>
-<string name="battery_reason_waiting">Sambungkan ke kereta untuk menyemak bateri dan jarak.</string>
 </resources>

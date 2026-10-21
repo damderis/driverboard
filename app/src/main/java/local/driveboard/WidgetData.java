@@ -75,26 +75,7 @@ public final class WidgetData {
         }
     }
 
-    public static final class BatterySnapshot {
-        public final int percent;
-        public final int rangeMeters;
-        public final String status;
-        public final String updated;
-        public final String reason;
 
-        public BatterySnapshot(int percent, int rangeMeters, String status, String updated,
-                String reason) {
-            this.percent = percent;
-            this.rangeMeters = rangeMeters;
-            this.status = status;
-            this.updated = updated;
-            this.reason = reason;
-        }
-
-        public String shortReason(Context context) {
-            return batteryReason(context, reason, true);
-        }
-    }
 
     public static boolean hasMediaAccess(Context c) {
         NotificationManager m = c.getSystemService(NotificationManager.class);
@@ -445,49 +426,4 @@ public final class WidgetData {
         }
     }
 
-    public static BatterySnapshot battery(Context c) {
-        SharedPreferences p = Store.prefs(c);
-        long at = p.getLong("battery_at", 0);
-        String reason = p.getString("battery_reason", null);
-        if (reason == null || reason.isEmpty()) {
-            reason = p.getBoolean("battery_unsupported", false) ? "car_not_sharing" : "waiting";
-        }
-        if (at <= 0) {
-            return new BatterySnapshot(-1, -1,
-                    "waiting".equals(reason) || "ok".equals(reason) ? "missing" : "unsupported",
-                    "", reason);
-        }
-        int pct = Math.round(p.getFloat("battery_pct", -1f));
-        int range = p.getInt("range_m", -1);
-        return new BatterySnapshot(pct, range,
-                System.currentTimeMillis() - at > 30 * 60 * 1000 ? "stale" : "live",
-                formatUpdated(at), reason);
-    }
-
-    public static String batteryReason(Context c, String reason, boolean shortLabel) {
-        Context lc = AppLocale.wrap(c);
-        int label;
-        switch (reason == null ? "waiting" : reason) {
-            case "permission_denied":
-                label = shortLabel ? R.string.battery_reason_permission_short
-                        : R.string.battery_reason_permission;
-                break;
-            case "not_electric":
-                label = shortLabel ? R.string.battery_reason_not_electric_short
-                        : R.string.battery_reason_not_electric;
-                break;
-            case "car_not_sharing":
-                label = shortLabel ? R.string.battery_reason_not_sharing_short
-                        : R.string.battery_reason_not_sharing;
-                break;
-            case "ok":
-                label = shortLabel ? R.string.battery_reason_ok_short
-                        : R.string.battery_reason_ok;
-                break;
-            default:
-                label = shortLabel ? R.string.battery_reason_waiting_short
-                        : R.string.battery_reason_waiting;
-        }
-        return lc.getString(label);
-    }
 }

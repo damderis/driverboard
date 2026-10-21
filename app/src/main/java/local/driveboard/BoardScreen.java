@@ -1,7 +1,6 @@
 package local.driveboard;
 
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Handler;
@@ -10,7 +9,6 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.View;
 
-import java.util.Collections;
 
 import androidx.annotation.NonNull;
 import androidx.car.app.AppManager;
@@ -22,12 +20,6 @@ import androidx.car.app.model.Action;
 import androidx.car.app.model.ActionStrip;
 import androidx.car.app.model.Template;
 import androidx.car.app.navigation.model.NavigationTemplate;
-import androidx.car.app.hardware.CarHardwareManager;
-import androidx.car.app.hardware.common.CarValue;
-import androidx.car.app.hardware.info.CarInfo;
-import androidx.car.app.hardware.info.EnergyLevel;
-import androidx.car.app.hardware.info.EnergyProfile;
-import androidx.car.app.hardware.common.OnCarDataAvailableListener;
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LifecycleEventObserver;
 
@@ -35,11 +27,11 @@ import androidx.lifecycle.LifecycleEventObserver;
 public final class BoardScreen extends Screen {
     private static final String TAG = "BoardScreen";
     private static final String CAR_TAG = "DriveBoardCar";
-    private static final String CAR_FUEL = "com.google.android.gms.permission.CAR_FUEL";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SharedPreferences prefs;
     private final BoardView board;
+    private final WeatherRepository.Callback weatherCallback = snapshot -> requestDraw();
     private final SharedPreferences.OnSharedPreferenceChangeListener prefsListener =
             (preferences, key) -> {
                 if (!"surface_width".equals(key) && !"surface_height".equals(key)
@@ -83,8 +75,6 @@ public final class BoardScreen extends Screen {
     private int consecutiveFailures;
     private long firstFailureAt;
     private long lastRecovery = -5000;
-    private String lastEnergyLog = "";
-    private long lastEnergyLogAt;
     private final android.view.Choreographer.FrameCallback frameCallback = this::onFrame;
     private long lastFrame;
     private boolean frameScheduled;
@@ -160,13 +150,6 @@ public final class BoardScreen extends Screen {
         }
     }
 
-    private void batteryReason(String reason) {
-        prefs.edit().remove("battery_pct").remove("range_m").remove("battery_at")
-                .putString("battery_reason", reason)
-                .putBoolean("battery_unsupported", !"ok".equals(reason) && !"waiting".equals(reason))
-                .apply();
-    }
-
     private SurfaceContainer container;
     private Surface surface;
     private Rect visibleArea = new Rect();
@@ -177,13 +160,10 @@ public final class BoardScreen extends Screen {
     private long callbackEpoch;
     private boolean lyricsVisible;
     private String lyricsTrackKey = "";
-    private CarInfo carInfo;
-    private boolean energyListening;
     private Boolean lastNight;
     private String lastMode;
     private int lastDrawWidth;
     private int lastDrawHeight;
-    private OnCarDataAvailableListener<EnergyLevel> energyListener;
 
     public BoardScreen(@NonNull CarContext carContext) {
         super(carContext);
@@ -252,7 +232,7 @@ public final class BoardScreen extends Screen {
         if (getCarContext().getCarAppApiLevel() < 5) {
             Log.i(CAR_TAG, "Surface taps need car API 5; use the Lyrics action");
         }
-        startCarEnergy();
+        WeatherRepository.start(getCarContext(), weatherCallback);
         scheduleTick();
     }
 
@@ -281,7 +261,7 @@ public final class BoardScreen extends Screen {
         } catch (RuntimeException error) {
             CarDiagnostics.log(getCarContext(), "Surface unregistration failed: " + error);
         }
-        stopCarEnergy();
+        WeatherRepository.stop(weatherCallback);
         releaseSurface();
     }
 
@@ -610,153 +590,4 @@ public final class BoardScreen extends Screen {
         board.setLyricsPosition(media.estimatedPositionMs());
     }
 
-    private void startCarEnergy() {
-        try {
-            int level = getCarContext().getCarAppApiLevel();
-            CarDiagnostics.log(getCarContext(), "Host car API level=" + level
-                    + " fuel permission=" + getCarContext().checkSelfPermission(CAR_FUEL));
-            batteryReason("waiting");
-            if (level < 3) {
-                Log.i(CAR_TAG, "Energy requires car API 3");
-                batteryReason("car_not_sharing");
-                return;
-            }
-            carInfo = getCarContext().getCarService(CarHardwareManager.class).getCarInfo();
-            final CarInfo requestedInfo = carInfo;
-            final long epoch = callbackEpoch;
-            carInfo.fetchEnergyProfile(getCarContext().getMainExecutor(),
-                    profile -> onEnergyProfile(epoch, requestedInfo, profile));
-        } catch (RuntimeException | LinkageError e) {
-            CarDiagnostics.log(getCarContext(), "Energy profile unavailable: " + e);
-            batteryReason("car_not_sharing");
-        }
-    }
-
-    private void onEnergyProfile(long epoch, CarInfo requestedInfo, EnergyProfile profile) {
-        if (!started || epoch != callbackEpoch || carInfo != requestedInfo || profile == null) {
-            return;
-        }
-        CarDiagnostics.log(getCarContext(), "Energy profile fuel status=" + profile.getFuelTypes().getStatus()
-                + " value=" + profile.getFuelTypes().getValue() + " connector status="
-                + profile.getEvConnectorTypes().getStatus() + " value="
-                + profile.getEvConnectorTypes().getValue());
-        boolean electric = success(profile.getFuelTypes())
-                && profile.getFuelTypes().getValue().contains(EnergyProfile.FUEL_TYPE_ELECTRIC);
-        boolean connector = success(profile.getEvConnectorTypes())
-                && !profile.getEvConnectorTypes().getValue().isEmpty();
-        if (!electric && !connector && success(profile.getFuelTypes())
-                && success(profile.getEvConnectorTypes())) {
-            CarDiagnostics.log(getCarContext(), "EV profile absent; energy listener not started");
-            batteryReason("not_electric");
-            return;
-        }
-        if (profile.getFuelTypes().getStatus() == CarValue.STATUS_UNAVAILABLE
-                || profile.getFuelTypes().getStatus() == CarValue.STATUS_UNIMPLEMENTED
-                || profile.getEvConnectorTypes().getStatus() == CarValue.STATUS_UNAVAILABLE
-                || profile.getEvConnectorTypes().getStatus() == CarValue.STATUS_UNIMPLEMENTED) {
-            batteryReason("car_not_sharing");
-        }
-        // Android Auto grants car-data permissions only at runtime.
-        if (getCarContext().checkSelfPermission(CAR_FUEL) != PackageManager.PERMISSION_GRANTED) {
-            batteryReason("permission_denied");
-            CarDiagnostics.log(getCarContext(), "Requesting " + CAR_FUEL);
-            getCarContext().requestPermissions(Collections.singletonList(CAR_FUEL),
-                    (granted, rejected) -> {
-                        CarDiagnostics.log(getCarContext(), "Fuel permission granted=" + granted + " rejected=" + rejected);
-                        if (!started || epoch != callbackEpoch) {
-                            return;
-                        }
-                        batteryReason(granted.contains(CAR_FUEL) ? "waiting" : "permission_denied");
-                        if (granted.contains(CAR_FUEL)) {
-                            startEnergyListener(epoch, requestedInfo);
-                        }
-                    });
-            return;
-        }
-        startEnergyListener(epoch, requestedInfo);
-    }
-
-    private void startEnergyListener(long epoch, CarInfo requestedInfo) {
-        if (!started || epoch != callbackEpoch || carInfo != requestedInfo) {
-            return;
-        }
-        try {
-            energyListener = level -> onEnergyLevel(epoch, level);
-            carInfo.addEnergyLevelListener(getCarContext().getMainExecutor(), energyListener);
-            energyListening = true;
-            prefs.edit().putBoolean("battery_unsupported", false).apply();
-            Log.i(CAR_TAG, "EV energy listener started");
-        } catch (RuntimeException | LinkageError e) {
-            CarDiagnostics.log(getCarContext(), "Energy listener unavailable: " + e);
-            batteryReason("car_not_sharing");
-        }
-    }
-
-    private static <T> boolean success(CarValue<T> value) {
-        return value != null && value.getStatus() == CarValue.STATUS_SUCCESS
-                && value.getValue() != null;
-    }
-
-    private void onEnergyLevel(long epoch, EnergyLevel level) {
-        if (!started || epoch != callbackEpoch || level == null) {
-            return;
-        }
-        CarValue<Float> battery = level.getBatteryPercent();
-        CarValue<Float> range = level.getRangeRemainingMeters();
-        String energy = "Energy level battery status=" + battery.getStatus() + " value="
-                + battery.getValue() + " range status=" + range.getStatus() + " value="
-                + range.getValue();
-        long now = android.os.SystemClock.elapsedRealtime();
-        if (!energy.equals(lastEnergyLog) || now - lastEnergyLogAt >= 60000) {
-            CarDiagnostics.log(getCarContext(), energy);
-            lastEnergyLog = energy;
-            lastEnergyLogAt = now;
-        }
-        SharedPreferences.Editor edit = prefs.edit();
-        boolean have = false;
-        if (success(battery) && Float.isFinite(battery.getValue())
-                && battery.getValue() >= 0 && battery.getValue() <= 100) {
-            edit.putFloat("battery_pct", battery.getValue());
-            have = true;
-        } else {
-            edit.remove("battery_pct");
-        }
-        if (success(range) && Float.isFinite(range.getValue())
-                && range.getValue() >= 0 && range.getValue() <= 2_000_000) {
-            edit.putInt("range_m", Math.round(range.getValue()));
-            have = true;
-        } else {
-            edit.remove("range_m");
-        }
-        if (have) {
-            edit.putString("battery_reason", success(battery) && Float.isFinite(battery.getValue())
-                    && battery.getValue() >= 0 && battery.getValue() <= 100
-                    ? "ok" : battery.getStatus() == CarValue.STATUS_UNAVAILABLE
-                            || battery.getStatus() == CarValue.STATUS_UNIMPLEMENTED
-                            ? "car_not_sharing" : "waiting");
-            edit.putLong("battery_at", System.currentTimeMillis())
-                    .putBoolean("battery_unsupported", false).apply();
-            Log.i(CAR_TAG, "Energy level updated");
-            requestDraw();
-        } else {
-            edit.remove("battery_at").putString("battery_reason",
-                    battery.getStatus() == CarValue.STATUS_UNAVAILABLE
-                            || battery.getStatus() == CarValue.STATUS_UNIMPLEMENTED
-                            ? "car_not_sharing" : "waiting").apply();
-            Log.i(CAR_TAG, "Energy level has no successful battery or range values");
-        }
-    }
-
-    private void stopCarEnergy() {
-        if (energyListening && carInfo != null && energyListener != null) {
-            try {
-                carInfo.removeEnergyLevelListener(energyListener);
-            } catch (RuntimeException | LinkageError e) {
-                Log.w(CAR_TAG, "Could not remove energy listener", e);
-            }
-        }
-        energyListening = false;
-        energyListener = null;
-        carInfo = null;
-    }
 }

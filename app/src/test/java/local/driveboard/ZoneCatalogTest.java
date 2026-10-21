@@ -15,6 +15,10 @@ public class ZoneCatalogTest {
             assertTrue(zone.code.matches("[A-Z]{3}[0-9]{2}"));
             assertTrue(codes.add(zone.code));
             assertFalse(zone.name.isEmpty());
+            ZoneCatalog.Centre centre = ZoneCatalog.centre(zone.code);
+            assertTrue(centre.latitude > 0 && centre.latitude < 8);
+            assertTrue(centre.longitude > 99 && centre.longitude < 120);
+            assertEquals(zone.name, centre.place);
         }
 
         assertEquals("Kuala Lumpur, Putrajaya", ZoneCatalog.name("WLY01"));
