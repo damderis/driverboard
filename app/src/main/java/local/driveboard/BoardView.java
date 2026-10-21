@@ -885,8 +885,10 @@ public final class BoardView extends View {
         }
         paint.setTextSize(Math.max(1f, size));
         float measured = paint.measureText(value == null ? DASH : value);
-        return Math.max(1f, measured > width && measured > 0
-                ? size * width / measured : size);
+        // 4% margin: variable-font widths don't scale exactly linearly, and a one-pixel
+        // overshoot made text() ellipsize the clock ("13:...").
+        return Math.max(1f, measured > width * .96f && measured > 0
+                ? size * width * .96f / measured : size);
     }
 
     private void text(Canvas canvas, String value, float x, float baseline,
