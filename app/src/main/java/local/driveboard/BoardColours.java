@@ -30,10 +30,6 @@ public final class BoardColours {
     public final int onPrimary;
     public final int onPrimaryContainer;
     public final int outlineVariant;
-    /** Highest role opacity, kept for callers that need a single conservative value. */
-    public final int containerAlpha;
-    private final int[] containerColours;
-    private final int[] containerAlphas;
 
     private BoardColours(int seed) {
         this.seed = seed | 0xFF000000;
@@ -49,19 +45,11 @@ public final class BoardColours {
         onPrimary = scheme.getOnPrimary();
         onPrimaryContainer = scheme.getOnPrimaryContainer();
         outlineVariant = scheme.getOutlineVariant();
-        containerColours = new int[]{surface, surfaceContainerLow, surfaceContainerHigh,
+        int[] containerColours = {surface, surfaceContainerLow, surfaceContainerHigh,
                 surfaceContainerHighest, primaryContainer,
                 secondaryContainer, tertiaryContainer};
         onSurface = accessible(scheme.getOnSurface(), scheme, containerColours);
         onSurfaceVariant = accessible(scheme.getOnSurfaceVariant(), scheme, containerColours);
-        containerAlphas = new int[containerColours.length];
-        int highest = 0;
-        for (int i = 0; i < containerColours.length; i++) {
-            containerAlphas[i] = readableContainerAlpha(containerColours[i],
-                    onSurface, onSurfaceVariant);
-            highest = Math.max(highest, containerAlphas[i]);
-        }
-        containerAlpha = highest;
     }
 
     public static synchronized BoardColours fromSeed(int seed) {
@@ -153,42 +141,15 @@ public final class BoardColours {
         return true;
     }
 
-    public int translucentContainer(int opaqueContainer) {
-        return (alphaForContainer(opaqueContainer) << 24)
-                | (opaqueContainer & 0x00FFFFFF);
+    public int alphaForBackdrop(int container, double backdropLuminance) {
+        return (int) Math.ceil(GlassTint.minimumAlpha(backdropLuminance, container,
+                onSurface, onSurfaceVariant) * 255);
     }
 
-    public int alphaForContainer(int opaqueContainer) {
-        for (int i = 0; i < containerColours.length; i++) {
-            if (containerColours[i] == opaqueContainer) {
-                return containerAlphas[i];
-            }
-        }
-        return containerAlpha;
-    }
-
-    private static int readableContainerAlpha(int container, int text, int secondaryText) {
-        for (int alpha = 0; alpha <= 255; alpha++) {
-            int overWhite = composite(container, 0xFFFFFFFF, alpha);
-            int overBlack = composite(container, 0xFF000000, alpha);
-            if (contrast(text, overWhite) >= 4.5 && contrast(text, overBlack) >= 4.5
-                    && contrast(secondaryText, overWhite) >= 4.5
-                    && contrast(secondaryText, overBlack) >= 4.5) {
-                return alpha;
-            }
-        }
-        return 255;
-    }
-
-    /** Matches an 8-bit SRC_OVER fill on an opaque picture pixel. */
-    static int composite(int foreground, int background, int alpha) {
-        int inverse = 255 - alpha;
-        int red = (((foreground >>> 16) & 255) * alpha
-                + ((background >>> 16) & 255) * inverse + 127) / 255;
-        int green = (((foreground >>> 8) & 255) * alpha
-                + ((background >>> 8) & 255) * inverse + 127) / 255;
-        int blue = ((foreground & 255) * alpha + (background & 255) * inverse + 127) / 255;
-        return 0xFF000000 | red << 16 | green << 8 | blue;
+    public int worstCaseGlassAlpha(int container) {
+        double black = GlassTint.minimumAlpha(0, container, onSurface, onSurfaceVariant);
+        double white = GlassTint.minimumAlpha(1, container, onSurface, onSurfaceVariant);
+        return (int) Math.ceil(Math.max(black, white) * 255);
     }
 
     public static double contrast(int a, int b) {

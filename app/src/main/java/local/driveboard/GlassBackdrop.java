@@ -4,7 +4,9 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Region;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -53,6 +55,65 @@ final class GlassBackdrop {
         }
     }
 
+    static double percentile90(Bitmap small, Path shape, int boardWidth, int boardHeight) {
+        if (small == null || small.isRecycled() || boardWidth <= 0 || boardHeight <= 0) {
+            return 0;
+        }
+        synchronized (small) {
+            int width = small.getWidth();
+            int height = small.getHeight();
+            Region region = new Region();
+            region.setPath(shape, new Region(0, 0, boardWidth, boardHeight));
+            int[] pixels = new int[width * height];
+            small.getPixels(pixels, 0, width, 0, 0, width, height);
+            float[] point = new float[2];
+            double[] values = new double[width * height];
+            int count = 0;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    point[0] = (x + .5f) * boardWidth / width;
+                    point[1] = (y + .5f) * boardHeight / height;
+                    if (region.contains(Math.round(point[0]), Math.round(point[1]))) {
+                        values[count++] = pixelLuminance(pixels[y * width + x]);
+                    }
+                }
+            }
+            if (count == 0) {
+                return 0;
+            }
+            java.util.Arrays.sort(values, 0, count);
+            int index = (int) Math.ceil(count * .90) - 1;
+            return values[Math.max(0, index)];
+        }
+    }
+
+    static double percentile90(Bitmap picture, int width, int height, Path shape) {
+        if (picture == null || picture.isRecycled() || width <= 0 || height <= 0) {
+            return 0;
+        }
+        synchronized (ENTRIES) {
+            for (Entry entry : ENTRIES) {
+                if (entry.picture == picture && entry.width == width
+                        && entry.height == height && entry.small != null
+                        && !entry.small.isRecycled()) {
+                    return percentile90(entry.small, shape, width, height);
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static double pixelLuminance(int color) {
+        return .2126 * linear((color >>> 16) & 255)
+                + .7152 * linear((color >>> 8) & 255)
+                + .0722 * linear(color & 255);
+    }
+
+    private static double linear(int channel) {
+        double value = channel / 255.0;
+        return value <= .04045 ? value / 12.92 : Math.pow((value + .055) / 1.055, 2.4);
+    }
+
     private static void prepare(Entry entry) {
         synchronized (ENTRIES) {
             if (!ENTRIES.contains(entry) || entry.waiters.isEmpty()) {
@@ -60,6 +121,7 @@ final class GlassBackdrop {
             }
         }
         Bitmap result = null;
+        Bitmap small = null;
         try {
             int width = Math.max(1, (entry.width + 7) / 8);
             int height = Math.max(1, (entry.height + 7) / 8);
@@ -80,15 +142,9 @@ final class GlassBackdrop {
                 int[] pixels = new int[width * height];
                 sample.getPixels(pixels, 0, width, 0, 0, width, height);
                 int[] blurred = BoxBlur.blur(pixels, width, height, 12);
-                Bitmap small = Bitmap.createBitmap(blurred, width, height,
+                small = Bitmap.createBitmap(blurred, width, height,
                         Bitmap.Config.ARGB_8888);
-                try {
-                    result = Bitmap.createScaledBitmap(small, entry.width, entry.height, true);
-                } finally {
-                    if (result != small) {
-                        small.recycle();
-                    }
-                }
+                result = Bitmap.createScaledBitmap(small, entry.width, entry.height, true);
             } finally {
                 sample.recycle();
             }
@@ -97,6 +153,7 @@ final class GlassBackdrop {
         }
         synchronized (ENTRIES) {
             entry.result = result;
+            entry.small = small;
             entry.finished = true;
             for (WeakReference<BoardView> reference : entry.waiters) {
                 BoardView view = reference.get();
@@ -125,6 +182,7 @@ final class GlassBackdrop {
         final int height;
         final ArrayList<WeakReference<BoardView>> waiters = new ArrayList<>();
         Bitmap result;
+        Bitmap small;
         boolean finished;
 
         Entry(Bitmap picture, int width, int height) {

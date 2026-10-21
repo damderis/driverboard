@@ -22,6 +22,8 @@ import android.view.View;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Shared proportional renderer for the phone preview and car surface. */
 public final class BoardView extends View {
@@ -42,6 +44,7 @@ public final class BoardView extends View {
     private String date = DASH;
     private Bitmap background;
     private Bitmap glassBackdrop;
+    private final Map<String, Integer> glassAlphas = new HashMap<>();
     private BoardColours colours;
     private Context words;
     private boolean editing;
@@ -207,6 +210,7 @@ public final class BoardView extends View {
     }
 
     void onGlassBackdropReady() {
+        glassAlphas.clear();
         invalidateStatic();
         if (frameRequestHook != null) {
             frameRequestHook.run();
@@ -520,8 +524,9 @@ public final class BoardView extends View {
             canvas.drawBitmap(glassBackdrop, null,
                     new RectF(0, 0, getWidth(), getHeight()), paint);
         }
-        paint.setColor(background == null ? (179 << 24) | (tint & 0x00FFFFFF)
-                : colours.translucentContainer(tint));
+        int alpha = background == null ? GlassTint.NO_PICTURE_ALPHA
+                : glassAlpha(shape, bounds, tint);
+        paint.setColor((alpha << 24) | (tint & 0x00FFFFFF));
         canvas.drawPath(shape, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(2f * getResources().getDisplayMetrics().density);
@@ -533,6 +538,24 @@ public final class BoardView extends View {
         paint.setShader(null);
         paint.setStyle(Paint.Style.FILL);
         canvas.restore();
+    }
+
+    private int glassAlpha(Path shape, RectF bounds, int tint) {
+        String key = System.identityHashCode(background) + ":" + getWidth() + "x" + getHeight()
+                + ":" + layout.toJson() + ":" + tint + ":" + colours.onSurface + ":"
+                + colours.onSurfaceVariant + ":" + bounds.left + "," + bounds.top + ","
+                + bounds.right + "," + bounds.bottom;
+        Integer cached = glassAlphas.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        double backdrop = GlassBackdrop.percentile90(background, getWidth(), getHeight(), shape);
+        int alpha = colours.alphaForBackdrop(tint, backdrop);
+        if (glassAlphas.size() >= 64) {
+            glassAlphas.clear();
+        }
+        glassAlphas.put(key, alpha);
+        return alpha;
     }
 
     private void drawLyrics(Canvas canvas, boolean staticPass) {
