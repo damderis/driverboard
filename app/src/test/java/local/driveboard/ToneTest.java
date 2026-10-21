@@ -19,7 +19,7 @@ public class ToneTest {
         assertEquals(5, Tone.values().length);
         for (Tone t : Tone.values()) {
             assertSame(t, Tone.from(t.id));
-            for (int text : new int[]{0xFFF4EFE4, 0xFFA9C2BD}) {
+            for (int text : new int[]{0xFFF4EFE4, 0xFFA9C2BD, 0xFF9DB3AF}) {
                 assertTrue(t.id, (luminance(text) + .05) / (luminance(t.panel) + .05) >= 4.5);
             }
         }

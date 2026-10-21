@@ -6,7 +6,8 @@
     <string name="board_range_km">%1$d km</string>
     <string name="board_updated">Dikemas kini %1$s</string>
     <string name="board_stale">Data tersimpan</string>
-    <string name="board_no_car_data">Tiada data daripada kereta</string>
+    <string name="board_no_car_data">Tiada data kereta</string>
+    <string name="board_imminent_minutes">dalam %1$d min</string>
     <string name="prayer_waiting">Menunggu waktu solat</string>
     <string name="prayer_unavailable">Waktu solat tidak tersedia</string>
     <string name="prayer_offline">Luar talian</string>

@@ -9,6 +9,7 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
+        <activity android:name=".CarEditorActivity" android:exported="false" />
         <service android:name=".DriveBoardService" android:exported="true">
             <intent-filter><action android:name="androidx.car.app.CarAppService"/><category android:name="androidx.car.app.category.NAVIGATION"/></intent-filter>
         </service>

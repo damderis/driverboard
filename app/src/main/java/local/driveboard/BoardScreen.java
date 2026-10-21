@@ -187,6 +187,7 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
             prefs.edit().putInt("visible_width", drawArea.width()).putInt("visible_height", drawArea.height()).apply();
         }
 
+        board.setCarNight(getCarContext().isDarkMode());
         board.refresh();
         int measuredWidth = View.MeasureSpec.makeMeasureSpec(drawArea.width(), View.MeasureSpec.EXACTLY);
         int measuredHeight = View.MeasureSpec.makeMeasureSpec(drawArea.height(), View.MeasureSpec.EXACTLY);
@@ -213,6 +214,11 @@ public final class BoardScreen extends Screen implements SurfaceCallback {
                 }
             }
         }
+    }
+
+    void onCarConfigurationChanged() {
+        board.invalidate();
+        drawBoard();
     }
 
     private void startCarEnergy() {

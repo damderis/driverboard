@@ -1,4 +1,4 @@
-﻿# DriveBoard
+# DriveBoard
 
 Personal Android Auto board for a Proton e.MAS, with a native Java phone layout editor. Android 12+; package `local.driveboard`. This sideloaded navigation-surface prototype is not a production navigation app or a claim of Play eligibility.
 
@@ -7,7 +7,7 @@ Personal Android Auto board for a Proton e.MAS, with a native Java phone layout 
 - Masjid Stone & Teal phone and car surfaces, with five live colour tones, system light/dark phone styling, and bundled Atkinson Hyperlegible Next Regular (400), SemiBold (600), ExtraBold (800). Google Fonts supplies a variable TTF; XML font families pin those three weights. Licence: `licenses/atkinsonhyperlegiblenext/OFL.txt`.
 - Clock/date, next JAKIM prayer and countdown, five daily prayers, active MediaSession title/artist, and car battery/range. The eight-point prayer star is drawn as two outlined squares. No sketch sample data is used.
 - Native settings card: zone picker/location, notification access, battery status, tone swatches, EN/BM. Native controls use sp text, at least 48dp targets, scrolling and system-bar insets. The car-aspect preview uses the shared proportional Canvas renderer.
-- Drag to move, bottom-right brass corner to resize on the 12 x 6 grid; preferences update the car live. Reset restores clock left, prayer upper right, music and battery below. Legacy layouts migrate to include battery.
+- Drag to move, bottom-right sage corner to resize on the 12 x 6 grid; preferences update the car live. Reset restores clock left, prayer upper right, music and battery below. Legacy layouts migrate to include battery.
 - EN/BM through `createConfigurationContext`; prayer names stay Subuh, Zohor, Asar, Maghrib, Isyak. Dates use the selected locale. Numerical drawing uses `tnum`.
 
 ## Build and install
@@ -54,7 +54,7 @@ Notification access is optional. Grant opens Android notification-listener setti
 
 ## Contrast
 
-WCAG relative luminance, fixed cream `#F4EFE4` and sage `#A9C2BD` against each panel. All requested shades pass 4.5:1 without adjustment.
+WCAG relative luminance, fixed cream `#F4EFE4` and sage `#A9C2BD` against each panel. Cream, sage and DIM pass 4.5:1; round 3 darkens the Emerald panel to #154A3B for DIM. The table below records the prior revision; current automated checks are in ToneTest.
 
 | Tone | Ground / panel | Cream | Sage |
 | --- | --- | ---: | ---: |
@@ -69,3 +69,9 @@ WCAG relative luminance, fixed cream `#F4EFE4` and sage `#A9C2BD` against each p
 ## Verification
 
 Build/test/install results and visual review are recorded in `.impeccable/review/verification.md`. The car itself requires a drive: app discovery, actual surface size and visible regions, live phone edits/tone/language, battery API statuses, disconnect/reconnect, stop/resume. Also test location grant/deny, zone changes, offline prayer cache and midnight rollover, media access grant/revoke and real music playback. Google Maps and a 3D car remain outside this change.
+
+## My car picture
+
+Choose a picture in the phone settings card, then tap the car paint in the editor. Adjust tolerance, a preset colour, hue or brightness; Save publishes the render to the board. Original preserves the picture. Images stay in app-private storage, at most 1024 pixels on the long side; no storage permission or bundled car photograph is used. Connected colour selection can include adjacent similarly coloured areas, so inspect the preview and adjust tolerance before saving.
+
+The board's existing battery layout slot also displays the saved car picture. Night styling follows the car host independently of the phone. Round 3 build/install and manual acceptance checks are in `.impeccable/review/round3.md`.

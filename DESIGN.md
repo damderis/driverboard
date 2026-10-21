@@ -15,3 +15,11 @@ Astra 6 reviewed implementation and all four required screenshots: visual pass, 
 ## Raster provenance
 
 No new shipping bitmap asset was created. Panels, star, swatches and handles are native geometry; the existing launcher icon is unchanged. Review PNGs are unedited adb screencaps of the connected Nothing A142 (1084 x 2412), 2026-10-21. They contain real clock/prayer data and truthful missing battery/notification access, not mock content. `before-phone.png` predates this change and was already present. Required final captures: phone-light.png, phone-dark.png, phone-font130.png, phone-tone-navy.png; extra language check: phone-bm.png.
+
+## Round 3 (2026-10-21)
+
+This revision removes board section headings, centres the larger glance content, reserves brass for the prayer marker/countdown, and uses sage edit handles. Dark phone controls use cream; tone selection has a separated ink/cream ring. The preview has a dark-mode hairline. Past prayers use regular weight; stale text uses contrast-checked #9DB3AF. Car night mode reduces cream brightness and uses a regular clock. Imminent prayer has a filled marker and minutes-only countdown without motion.
+
+The parked-phone My car editor accepts only the owner's selected picture, stores a downscaled private PNG, and previews connected paint recolouring with preserved shading. No car photograph is bundled. The board uses only the saved render, cached by its preference revision. Source image provenance belongs to the user-selected file.
+
+Round 3 review is source review by Astra 6 plus automated tests/build. No screenshots or phone interaction were performed; visual acceptance remains with the owner. Earlier screenshot verdicts above describe the previous revision only.

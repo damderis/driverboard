@@ -1,0 +1,28 @@
+<resources>
+    <string name="my_car">My car</string>
+    <string name="no_picture">No picture</string>
+    <string name="choose_picture">Choose</string>
+    <string name="picture_import_failed">Could not open picture</string>
+    <string name="car_editor_title">Paint your car</string>
+    <string name="car_editor_image">Car picture. Tap the paint to select it.</string>
+    <string name="car_editor_hint">Tap the car\'s paint</string>
+    <string name="car_editor_selected">Paint area selected. Adjust the colour below.</string>
+    <string name="car_editor_colours">Colour</string>
+    <string name="car_editor_tolerance">Tolerance</string>
+    <string name="car_editor_hue">Custom hue</string>
+    <string name="car_editor_brightness">Brightness</string>
+    <string name="car_editor_cancel">Cancel</string>
+    <string name="car_editor_save">Save</string>
+    <string name="car_editor_tap_first">Tap the car body first</string>
+    <string name="car_editor_save_error">Could not save picture</string>
+    <string-array name="car_editor_presets">
+        <item>Original</item>
+        <item>Slate Grey</item>
+        <item>White</item>
+        <item>Black</item>
+        <item>Red</item>
+        <item>Blue</item>
+        <item>Teal</item>
+        <item>Gold</item>
+    </string-array>
+</resources>

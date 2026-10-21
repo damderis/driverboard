@@ -9,6 +9,13 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.BitmapFactory;
+import android.os.Build;
+import android.provider.MediaStore;
+import android.widget.ImageView;
+import android.widget.Toast;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -26,7 +33,11 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 public final class MainActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
-    private static final int BRASS = 0xFFC8A55A;
+    private static final int PICK_CAR = 20;
+    private final ExecutorService pictureWorker = Executors.newSingleThreadExecutor();
+    private ImageView carThumbnail;
+    private TextView carPlaceholder;
+    private long thumbnailVersion = Long.MIN_VALUE;
     private static final int CREAM = 0xFFF4EFE4;
     private static final int FAINT_CREAM = 0x66F4EFE4;
 
@@ -107,6 +118,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         addPrayerRow(card);
         addMediaRow(card);
         addBatteryRow(card);
+        addCarRow(card);
         addToneRow(card, tone);
         addLanguageRow(card, tone);
         addFooter(content);
@@ -130,6 +142,11 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     private void addBoard(LinearLayout content, Tone tone) {
         board = new BoardView(this);
         board.setBackground(shape(tone.ground, 14));
+        if (night) {
+            GradientDrawable edge = shape(Color.TRANSPARENT, 14);
+            edge.setStroke(dp(1), hairline);
+            board.setForeground(edge);
+        }
         board.setClipToOutline(true);
         board.setContentDescription(getString(R.string.preview_description));
         board.setEditing(true, () -> {});
@@ -145,12 +162,29 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private void addPrayerRow(LinearLayout card) {
         LinearLayout prayer = row(card, false);
-        LinearLayout zone = description(prayer, R.string.prayer_zone);
+        prayer.setOrientation(LinearLayout.VERTICAL);
+        prayer.setGravity(Gravity.START);
+        LinearLayout zone = column();
+        zone.addView(text(getString(R.string.prayer_zone), 15, true));
+        prayer.addView(zone, new LinearLayout.LayoutParams(-1, -2));
         zoneDetail = detail(zone, "");
         prayer.setOnClickListener(view -> pickZone());
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
+        actionParams.topMargin = dp(8);
+        prayer.addView(actions, actionParams);
         Button location = pill(getString(R.string.use_location));
         location.setOnClickListener(view -> useLocation());
-        prayer.addView(location);
+        actions.addView(location);
+        TextView change = text(getString(R.string.change_zone), 12, true);
+        change.setTextColor(accent);
+        change.setGravity(Gravity.CENTER);
+        change.setMinWidth(dp(48));
+        change.setMinHeight(dp(48));
+        change.setPadding(dp(8), 0, 0, 0);
+        change.setOnClickListener(view -> pickZone());
+        actions.addView(change);
     }
 
     private void addMediaRow(LinearLayout card) {
@@ -172,6 +206,60 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         batteryValue = text("", 13, true);
         batteryValue.setFontFeatureSettings("tnum");
         battery.addView(batteryValue);
+    }
+
+    private void addCarRow(LinearLayout card) {
+        LinearLayout car = row(card, true);
+        LinearLayout description = description(car, R.string.my_car);
+        carPlaceholder = detail(description, getString(R.string.no_picture));
+        carThumbnail = new ImageView(this);
+        carThumbnail.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        carThumbnail.setContentDescription(getString(R.string.my_car));
+        car.addView(carThumbnail, new LinearLayout.LayoutParams(dp(72), dp(48)));
+        Button choose = pill(getString(R.string.choose_picture));
+        choose.setOnClickListener(view -> chooseCarPicture());
+        car.addView(choose);
+        car.setOnClickListener(view -> {
+            if (CarPictureStore.sourceFile(this).isFile()) {
+                startActivity(new Intent(this, CarEditorActivity.class));
+            } else {
+                chooseCarPicture();
+            }
+        });
+        thumbnailVersion = Long.MIN_VALUE;
+    }
+
+    private void chooseCarPicture() {
+        Intent intent = new Intent(Build.VERSION.SDK_INT >= 33
+                ? MediaStore.ACTION_PICK_IMAGES : Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        if (Build.VERSION.SDK_INT < 33) {
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+        }
+        startActivityForResult(intent, PICK_CAR);
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_CAR || result != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        android.net.Uri uri = data.getData();
+        pictureWorker.execute(() -> {
+            try {
+                CarPictureStore.importSource(this, uri);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        updateStates();
+                        startActivity(new Intent(this, CarEditorActivity.class));
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.picture_import_failed, Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void addToneRow(LinearLayout card, Tone tone) {
@@ -200,13 +288,18 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         target.setSelected(option == tone);
         View circle = new View(this);
         GradientDrawable drawable = shape(option.ground, 24);
-        if (option == tone) {
-            drawable.setStroke(dp(3), BRASS);
-        } else if (night) {
+        if (night) {
             drawable.setStroke(dp(1), FAINT_CREAM);
         }
         circle.setBackground(drawable);
         target.addView(circle, new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER));
+        if (option == tone) {
+            View ring = new View(this);
+            GradientDrawable outline = shape(Color.TRANSPARENT, 24);
+            outline.setStroke(dp(2), night ? CREAM : ink);
+            ring.setBackground(outline);
+            target.addView(ring, new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER));
+        }
         swatches.addView(target, new LinearLayout.LayoutParams(0, dp(48), 1));
         target.setOnClickListener(view -> {
             Store.prefs(this).edit().putString("tone", option.id).apply();
@@ -230,6 +323,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         Button option = new Button(this);
         option.setText(lang.equals("en") ? "EN" : "BM");
         option.setTextSize(13);
+        option.setStateListAnimator(null);
         option.setTypeface(Fonts.semibold(this));
         option.setMinWidth(0);
         option.setMinimumWidth(dp(52));
@@ -253,8 +347,13 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         reset.setGravity(Gravity.CENTER);
         reset.setMinHeight(dp(48));
         reset.setTextColor(accent);
-        reset.setOnClickListener(view -> Store.prefs(this).edit()
-                .putString("layout", BoardLayout.defaults().toJson()).apply());
+        reset.setOnClickListener(view -> new AlertDialog.Builder(this)
+                .setTitle(R.string.reset_layout)
+                .setMessage(R.string.reset_layout_confirmation)
+                .setPositiveButton(R.string.reset_action, (dialog, which) -> Store.prefs(this).edit()
+                        .putString("layout", BoardLayout.defaults().toJson()).apply())
+                .setNegativeButton(R.string.cancel_action, null)
+                .show());
         content.addView(reset, new LinearLayout.LayoutParams(-1, -2));
         TextView help = text(getString(R.string.auto_help), 11, false);
         help.setTextColor(muted);
@@ -263,7 +362,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     }
 
     private int filledControlColor(Tone tone) {
-        return night ? BRASS : tone.ground;
+        return night ? CREAM : tone.ground;
     }
 
     private int filledControlTextColor(Tone tone) {
@@ -331,6 +430,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         Tone tone = Tone.current(this);
         Button button = new Button(this);
         button.setText(label);
+        button.setStateListAnimator(null);
         button.setTextSize(12);
         button.setTypeface(Fonts.semibold(this));
         button.setTextColor(filledControlTextColor(tone));
@@ -348,6 +448,15 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         allowed.setVisibility(access ? View.VISIBLE : View.GONE);
         grant.setVisibility(access ? View.GONE : View.VISIBLE);
         SharedPreferences prefs = Store.prefs(this);
+        long renderVersion = prefs.getLong("car_render_at", 0);
+        if (thumbnailVersion != renderVersion) {
+            thumbnailVersion = renderVersion;
+            boolean rendered = CarPictureStore.renderFile(this).isFile();
+            carThumbnail.setImageBitmap(rendered ? BitmapFactory.decodeFile(
+                    CarPictureStore.renderFile(this).getAbsolutePath()) : null);
+            carThumbnail.setVisibility(rendered ? View.VISIBLE : View.GONE);
+            carPlaceholder.setVisibility(rendered ? View.GONE : View.VISIBLE);
+        }
         zoneDetail.setText(locationMessage != null ? locationMessage
                 : WidgetData.zone(this) + " · " + WidgetData.zoneName(this));
         long at = prefs.getLong("battery_at", 0);
@@ -371,7 +480,8 @@ public final class MainActivity extends Activity implements SharedPreferences.On
             batteryDetail.setText(getString(R.string.battery_summary, pct, range,
                     System.currentTimeMillis() - at > 1800000
                             ? getString(R.string.updated, when) : when));
-            batteryDetail.setAlpha(System.currentTimeMillis() - at > 1800000 ? .65f : 1f);
+            batteryDetail.setAlpha(1f);
+            batteryDetail.setTextColor(muted);
         }
     }
 
@@ -469,6 +579,12 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         handler.removeCallbacks(tick);
         Store.prefs(this).unregisterOnSharedPreferenceChangeListener(this);
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        pictureWorker.shutdown();
+        super.onDestroy();
     }
 
     @Override

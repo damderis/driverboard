@@ -3,7 +3,7 @@ package local.driveboard;
 /** Shared phone and car palette. RGB values keep this table testable on the JVM. */
 public enum Tone {
     TEAL("teal", 0xFF0F3D3E, 0xFF16494A),
-    EMERALD("emerald", 0xFF0E3B2E, 0xFF15503F),
+    EMERALD("emerald", 0xFF0E3B2E, 0xFF154A3B),
     NAVY("navy", 0xFF13233F, 0xFF1B3156),
     MAROON("maroon", 0xFF3A1420, 0xFF4D1D2C),
     GRAPHITE("graphite", 0xFF24272B, 0xFF2F3337);

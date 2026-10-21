@@ -5,6 +5,7 @@ import androidx.car.app.CarAppService;
 import androidx.car.app.Screen;
 import androidx.car.app.Session;
 import androidx.car.app.validation.HostValidator;
+import android.content.res.Configuration;
 
 /** Entry point for the car host. */
 public final class DriveBoardService extends CarAppService {
@@ -20,10 +21,20 @@ public final class DriveBoardService extends CarAppService {
     @Override
     public Session onCreateSession() {
         return new Session() {
+            private BoardScreen boardScreen;
+
             @NonNull
             @Override
             public Screen onCreateScreen(@NonNull android.content.Intent intent) {
-                return new BoardScreen(getCarContext());
+                boardScreen = new BoardScreen(getCarContext());
+                return boardScreen;
+            }
+
+            @Override
+            public void onCarConfigurationChanged(@NonNull Configuration configuration) {
+                if (boardScreen != null) {
+                    boardScreen.onCarConfigurationChanged();
+                }
             }
         };
     }
