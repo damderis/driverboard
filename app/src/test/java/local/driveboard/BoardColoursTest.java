@@ -30,4 +30,34 @@ public class BoardColoursTest {
             }
         }
     }
+
+    @Test
+    public void translucentContainersRemainReadableOverBlackAndWhitePictures() {
+        int[] seeds = {0xFF0F6E6E, 0xFF3FB978, 0xFF688FCB,
+                0xFFC36B82, 0xFF818A91, 0xFFFFFFFF, 0xFF000000};
+        for (int seed : seeds) {
+            BoardColours colours = BoardColours.fromSeed(seed);
+            assertTrue(colours.containerAlpha >= 209);
+            int[] containers = {colours.surface, colours.surfaceContainerLow,
+                    colours.surfaceContainerHigh, colours.surfaceContainerHighest,
+                    colours.primaryContainer, colours.secondaryContainer,
+                    colours.tertiaryContainer};
+            for (int container : containers) {
+                assertEquals(colours.containerAlpha,
+                        colours.translucentContainer(container) >>> 24);
+                for (int backdrop : new int[]{0xFF000000, 0xFFFFFFFF}) {
+                    int blended = BoardColours.composite(container, backdrop,
+                            colours.containerAlpha);
+                    assertTrue("text seed=" + Integer.toHexString(seed)
+                                    + " container=" + Integer.toHexString(container)
+                                    + " backdrop=" + Integer.toHexString(backdrop),
+                            BoardColours.contrast(colours.onSurface, blended) >= 4.5);
+                    assertTrue("secondary text seed=" + Integer.toHexString(seed)
+                                    + " container=" + Integer.toHexString(container)
+                                    + " backdrop=" + Integer.toHexString(backdrop),
+                            BoardColours.contrast(colours.onSurfaceVariant, blended) >= 4.5);
+                }
+            }
+        }
+    }
 }

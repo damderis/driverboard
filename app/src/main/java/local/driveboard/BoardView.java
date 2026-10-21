@@ -16,6 +16,7 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.view.MotionEvent;
+import android.view.Choreographer;
 import android.view.View;
 
 import java.text.SimpleDateFormat;
@@ -56,6 +57,66 @@ public final class BoardView extends View {
     private boolean lyricsVisible;
     private boolean lyricsLoading;
     private long lyricsPosition;
+    private Bitmap staticLayer;
+    private boolean staticDirty = true;
+    private long staticDrawnAt;
+    private Runnable frameRequestHook;
+    private boolean frameScheduled;
+    private int slowFrames;
+    private boolean reducedFrameRate;
+    private long lastRenderedFrameNanos;
+    private long frameLogAt;
+    private long frameTotalMs;
+    private int frameCount;
+    private int displayedLyric = Integer.MIN_VALUE;
+    private int outgoingLyric = -1;
+    private long lyricTransitionAt;
+    private LyricBlock currentLyricBlock;
+    private LyricBlock outgoingLyricBlock;
+
+    private static final class LyricBlock {
+        final LyricsDocument document;
+        final int index;
+        final float width;
+        final float height;
+        final StaticLayout[] lines;
+        final float gap;
+        final float totalHeight;
+
+        LyricBlock(LyricsDocument document, int index, RectF area,
+                StaticLayout[] lines, float gap, float totalHeight) {
+            this.document = document;
+            this.index = index;
+            width = area.width();
+            height = area.height();
+            this.lines = lines;
+            this.gap = gap;
+            this.totalHeight = totalHeight;
+        }
+
+        boolean matches(LyricsDocument document, int index, RectF area) {
+            return this.document == document && this.index == index
+                    && width == area.width() && height == area.height();
+        }
+    }
+    private final Choreographer.FrameCallback frameCallback = frameTimeNanos -> {
+        frameScheduled = false;
+        if (!isAttachedToWindow() || getVisibility() != VISIBLE
+                || frameRequestHook != null) {
+            return;
+        }
+        if (isMediaPlaying()) {
+            long spacing = reducedFrameRate ? 65_000_000L : 32_000_000L;
+            if (lastRenderedFrameNanos > 0
+                    && frameTimeNanos - lastRenderedFrameNanos < spacing) {
+                scheduleFrame();
+                return;
+            }
+        }
+        lastRenderedFrameNanos = frameTimeNanos;
+        invalidate();
+        scheduleFrame();
+    };
 
     public BoardView(Context c) {
         super(c);
@@ -63,45 +124,137 @@ public final class BoardView extends View {
     }
 
     public void setEditing(boolean value, Runnable callback) {
+        boolean changed = editing != value;
         editing = value;
         onEdit = callback;
-        invalidate();
+        if (changed) {
+            invalidateStatic();
+        }
     }
 
     public void setCarNight(boolean value) {
+        if (carNight == value) {
+            return;
+        }
         carNight = value;
-        invalidate();
+        invalidateStatic();
     }
 
     public void setLyricsVisible(boolean value) {
+        if (lyricsVisible == value) {
+            return;
+        }
         lyricsVisible = value;
-        invalidate();
+        displayedLyric = Integer.MIN_VALUE;
+        clearLyricBlocks();
+        invalidateStatic();
     }
 
     public void setLyricsLoading(boolean value) {
+        if (lyricsLoading == value) {
+            return;
+        }
         lyricsLoading = value;
         if (lyricsVisible) {
-            invalidate();
+            invalidateStatic();
         }
     }
 
     public void setLyrics(LyricsDocument document) {
+        if (lyrics == document) {
+            return;
+        }
         lyrics = document;
+        displayedLyric = Integer.MIN_VALUE;
+        clearLyricBlocks();
         if (lyricsVisible) {
-            invalidate();
+            invalidateStatic();
         }
     }
 
     public void setLyricsPosition(long positionMs) {
-        int before = lyricsLineIndex();
         lyricsPosition = Math.max(0, positionMs);
-        if (lyricsVisible && before != lyricsLineIndex()) {
+        if (lyricsVisible) {
             invalidate();
         }
     }
 
     public int lyricsLineIndex() {
-        return lyrics == null ? -1 : lyrics.lineIndexAt(lyricsPosition);
+        return lyrics == null ? -1 : lyrics.lineIndexAt(currentLyricsPosition());
+    }
+
+    public boolean isMediaPlaying() {
+        return media != null && media.playing;
+    }
+
+    /** Car surfaces request their own frames; phone previews use Choreographer. */
+    public void setFrameRequestHook(Runnable hook) {
+        frameRequestHook = hook;
+        if (hook == null) {
+            scheduleFrame();
+        }
+    }
+
+    private long currentLyricsPosition() {
+        return isMediaPlaying() ? media.estimatedPositionMs() : lyricsPosition;
+    }
+
+    private void invalidateStatic() {
+        staticDirty = true;
+        invalidate();
+    }
+
+    private void clearLyricBlocks() {
+        currentLyricBlock = null;
+        outgoingLyricBlock = null;
+    }
+
+    private void scheduleFrame() {
+        if (frameScheduled || frameRequestHook != null || !isAttachedToWindow()
+                || getVisibility() != VISIBLE) {
+            return;
+        }
+        frameScheduled = true;
+        if (isMediaPlaying()) {
+            Choreographer.getInstance().postFrameCallback(frameCallback);
+        } else {
+            Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, 1000);
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        scheduleFrame();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        Choreographer.getInstance().removeFrameCallback(frameCallback);
+        frameScheduled = false;
+        lastRenderedFrameNanos = 0;
+        slowFrames = 0;
+        reducedFrameRate = false;
+        if (staticLayer != null) {
+            staticLayer.recycle();
+            staticLayer = null;
+        }
+        super.onDetachedFromWindow();
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        if (visibility == VISIBLE) {
+            scheduleFrame();
+        }
+    }
+
+    @Override
+    protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        clearLyricBlocks();
+        invalidateStatic();
     }
 
     public int surfaceColor() {
@@ -142,7 +295,9 @@ public final class BoardView extends View {
         media = WidgetData.mediaSnapshot(words);
         background = BackgroundStore.load(getContext());
         colours = BoardColours.current(getContext(), media == null ? null : media.art);
-        invalidate();
+        clearLyricBlocks();
+        invalidateStatic();
+        scheduleFrame();
     }
 
     private float unit() {
@@ -167,6 +322,57 @@ public final class BoardView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        long drawStarted = SystemClock.uptimeMillis();
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (staticLayer == null || staticLayer.isRecycled()
+                || staticLayer.getWidth() != width || staticLayer.getHeight() != height) {
+            if (staticLayer != null && !staticLayer.isRecycled()) {
+                staticLayer.recycle();
+            }
+            staticLayer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            staticDirty = true;
+        }
+        if (staticDirty || now - staticDrawnAt >= 1000) {
+            staticLayer.eraseColor(0);
+            drawStatic(new Canvas(staticLayer));
+            staticDrawnAt = now;
+            staticDirty = false;
+        }
+        paint.setColor(0xFFFFFFFF);
+        paint.setAlpha(255);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawBitmap(staticLayer, 0, 0, paint);
+        if (lyricsVisible) {
+            drawTimedLyrics(canvas);
+        } else {
+            drawProgress(canvas);
+        }
+        long drawMs = SystemClock.uptimeMillis() - drawStarted;
+        slowFrames = drawMs > 33 ? slowFrames + 1 : 0;
+        if (slowFrames >= 3) {
+            reducedFrameRate = true;
+        }
+        frameTotalMs += drawMs;
+        frameCount++;
+        long loggedAt = SystemClock.uptimeMillis();
+        if (frameLogAt == 0) {
+            frameLogAt = loggedAt;
+        } else if (loggedAt - frameLogAt >= 30_000) {
+            CarDiagnostics.log(getContext(), "Board preview avg draw "
+                    + (frameTotalMs / Math.max(1, frameCount)) + "ms / "
+                    + frameCount + " frames");
+            frameLogAt = loggedAt;
+            frameTotalMs = 0;
+            frameCount = 0;
+        }
+    }
+
+    private void drawStatic(Canvas canvas) {
         if (colours == null) {
             colours = BoardColours.current(getContext(), media == null ? null : media.art);
         }
@@ -187,7 +393,7 @@ public final class BoardView extends View {
             paint.setAlpha(255);
         }
         if (lyricsVisible) {
-            drawLyrics(canvas);
+            drawLyrics(canvas, true);
             return;
         }
         if (editing) {
@@ -205,6 +411,9 @@ public final class BoardView extends View {
                     Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
             if ("media".equals(c.type)) {
                 pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
+            } else if ("prayer".equals(c.type)) {
+                pad = Math.max(7f * unit(),
+                        Math.min(22f * unit(), Math.min(r.width(), r.height()) * .18f));
             }
             RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
             if ("clock".equals(c.type)) {
@@ -277,12 +486,14 @@ public final class BoardView extends View {
                 : "media".equals(type) ? colours.secondaryContainer
                 : colours.tertiaryContainer;
         paint.setStyle(Paint.Style.FILL);
+        if (background != null && !background.isRecycled()) {
+            color = colours.translucentContainer(color);
+        }
         paint.setColor(color);
-        paint.setAlpha(255);
         canvas.drawPath(cardPath(type, bounds), paint);
     }
 
-    private void drawLyrics(Canvas canvas) {
+    private void drawLyrics(Canvas canvas, boolean staticPass) {
         float inset = Math.max(12f * unit(), getWidth() * .035f);
         RectF content = new RectF(inset, inset,
                 getWidth() - inset, getHeight() - inset);
@@ -291,11 +502,13 @@ public final class BoardView extends View {
         float artSize = Math.min(content.height() * .50f, content.width() * .31f);
         RectF artBounds = new RectF(content.left, content.top,
                 content.left + artSize, content.top + artSize);
-        drawLyricsArt(canvas, artBounds);
+        if (staticPass) {
+            drawLyricsArt(canvas, artBounds);
+        }
         float leftWidth = artSize;
-        float titleSize = Math.min(20f * unit(), content.height() * .15f);
+        float titleSize = Math.min(20f * unit(), content.height() * .15f) * .80f;
         float titleY = artBounds.bottom + 8f * unit() + titleSize;
-        if (media != null) {
+        if (staticPass && media != null) {
             text(canvas, media.title, content.left, titleY, titleSize,
                     CREAM, Fonts.semibold(getContext()), leftWidth);
             text(canvas, media.artist, content.left,
@@ -306,53 +519,39 @@ public final class BoardView extends View {
         RectF lyricArea = new RectF(lyricLeft, content.top,
                 content.right, content.bottom);
         if (lyricsLoading || lyrics == null || lyrics.isEmpty()) {
-            int message = lyricsLoading ? R.string.lyrics_loading
-                    : media == null || !media.hasTrack ? R.string.lyrics_no_track
-                    : R.string.lyrics_unavailable;
-            stateText(canvas, words.getString(message), lyricArea,
-                    Math.min(24f * unit(), lyricArea.height() * .24f), CREAM);
+            if (staticPass) {
+                int message = lyricsLoading ? R.string.lyrics_loading
+                        : media == null || !media.hasTrack ? R.string.lyrics_no_track
+                        : R.string.lyrics_unavailable;
+                stateText(canvas, words.getString(message), lyricArea,
+                        Math.min(24f * unit(), lyricArea.height() * .24f), CREAM);
+            }
             canvas.restore();
             return;
         }
         if (lyrics.isTimed()) {
-            int current = lyricsLineIndex();
-            if (current < 0) {
-                current = 0;
-            }
-            int[] indexes = {current - 1, current, current + 1, current + 2};
-            int[] colors = {withAlpha(SAGE, .5f),
-                    lyricsLineIndex() >= 0 ? BRASS : SAGE,
-                    withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)};
-            float mainSize = Math.min(25f * unit(), lyricArea.height() * .22f);
-            float sideSize = Math.min(16f * unit(), lyricArea.height() * .14f);
-            float gap = Math.max(2f * unit(), lyricArea.height() * .045f);
-            StaticLayout[] lines = lyricLayouts(indexes, colors,
-                    lyricArea.width(), mainSize, sideSize,
-                    lyricsLineIndex() >= 0);
-            float total = lyricBlockHeight(lines, gap);
-            if (total > lyricArea.height() * .95f) {
-                float scale = lyricArea.height() * .95f / total;
-                gap *= scale;
-                lines = lyricLayouts(indexes, colors, lyricArea.width(),
-                        mainSize * scale, sideSize * scale,
-                        lyricsLineIndex() >= 0);
-                total = lyricBlockHeight(lines, gap);
-            }
-            float y = lyricArea.centerY() - total / 2f;
-            canvas.save();
-            canvas.clipRect(lyricArea);
-            for (StaticLayout line : lines) {
-                if (line == null) {
-                    continue;
+            if (!staticPass) {
+                int current = Math.max(0, lyricsLineIndex());
+                long now = SystemClock.uptimeMillis();
+                if (displayedLyric != current) {
+                    outgoingLyric = displayedLyric;
+                    outgoingLyricBlock = currentLyricBlock;
+                    currentLyricBlock = null;
+                    displayedLyric = current;
+                    lyricTransitionAt = now;
                 }
-                canvas.save();
-                canvas.translate(lyricArea.left, y);
-                line.draw(canvas);
-                canvas.restore();
-                y += line.getHeight() + gap;
+                float t = Math.min(1f, (now - lyricTransitionAt) / 320f);
+                float eased = 1f - (1f - t) * (1f - t) * (1f - t);
+                float travel = Math.min(18f * unit(), lyricArea.height() * .18f);
+                if (outgoingLyric >= 0 && t < 1f) {
+                    drawLyricBlock(canvas, lyricArea, outgoingLyric, true,
+                            -travel * eased, Math.round(255f * (1f - eased)));
+                }
+                drawLyricBlock(canvas, lyricArea, current, false,
+                        travel * (1f - eased), outgoingLyric < 0 ? 255
+                                : Math.round(255f * eased));
             }
-            canvas.restore();
-        } else {
+        } else if (staticPass) {
             TextPaint lyricPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
             lyricPaint.setColor(CREAM);
             lyricPaint.setTypeface(Fonts.regular(getContext()));
@@ -368,6 +567,59 @@ public final class BoardView extends View {
             lines.draw(canvas);
         }
         canvas.restore();
+    }
+
+    private void drawTimedLyrics(Canvas canvas) {
+        if (lyrics != null && lyrics.isTimed() && !lyricsLoading && !lyrics.isEmpty()) {
+            drawLyrics(canvas, false);
+        }
+    }
+
+    private void drawLyricBlock(Canvas canvas, RectF area, int current,
+            boolean outgoing, float offsetY, int alpha) {
+        LyricBlock block = outgoing ? outgoingLyricBlock : currentLyricBlock;
+        if (block == null || !block.matches(lyrics, current, area)) {
+            block = createLyricBlock(area, current);
+            if (outgoing) {
+                outgoingLyricBlock = block;
+            } else {
+                currentLyricBlock = block;
+            }
+        }
+        float y = area.centerY() - block.totalHeight / 2f + offsetY;
+        canvas.saveLayerAlpha(area, Math.max(0, Math.min(255, alpha)));
+        canvas.clipRect(area);
+        for (StaticLayout line : block.lines) {
+            if (line == null) {
+                continue;
+            }
+            canvas.save();
+            canvas.translate(area.left, y);
+            line.draw(canvas);
+            canvas.restore();
+            y += line.getHeight() + block.gap;
+        }
+        canvas.restore();
+    }
+
+    private LyricBlock createLyricBlock(RectF area, int current) {
+        int[] indexes = {current - 1, current, current + 1, current + 2};
+        int[] colors = {withAlpha(SAGE, .5f), BRASS,
+                withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)};
+        float mainSize = Math.min(25f * unit(), area.height() * .22f) * .70f;
+        float sideSize = Math.min(16f * unit(), area.height() * .14f) * .70f;
+        float gap = Math.max(2f * unit(), area.height() * .045f);
+        StaticLayout[] lines = lyricLayouts(indexes, colors, area.width(),
+                mainSize, sideSize, true);
+        float total = lyricBlockHeight(lines, gap);
+        if (total > area.height() * .95f) {
+            float scale = area.height() * .95f / total;
+            gap *= scale;
+            lines = lyricLayouts(indexes, colors, area.width(),
+                    mainSize * scale, sideSize * scale, true);
+            total = lyricBlockHeight(lines, gap);
+        }
+        return new LyricBlock(lyrics, current, area, lines, gap, total);
     }
 
     private void drawLyricsArt(Canvas canvas, RectF bounds) {
@@ -525,7 +777,7 @@ public final class BoardView extends View {
         boolean stale = prayer != null && "stale".equals(prayer.status);
         float limit = gridRows >= 3 ? r.top + r.height() * .72f : r.bottom;
         float star = Math.min(28f * unit(), Math.max(10f * unit(), r.height() * .36f));
-        star = Math.min(star, r.width() * .15f);
+        star = Math.min(star, Math.min(r.width() * .15f, (limit - r.top) * .62f));
         float x = r.left;
         if (next != null && r.width() >= star * 3.2f && r.height() >= star * 1.5f) {
             drawStar(canvas, x + star / 2,
@@ -554,9 +806,9 @@ public final class BoardView extends View {
         }
         float available = Math.max(1f, limit - r.top);
         float titleSize = Math.min(32f * unit(), Math.min(r.height() * .40f,
-                available * .57f));
+                available * .57f)) * .80f;
         float countSize = Math.min(18f * unit(), Math.min(r.height() * .22f,
-                available * .42f));
+                available * .42f)) * .85f;
         float blockHeight = titleSize + countSize * 1.12f;
         float titleY = r.top + (available - blockHeight) / 2f + titleSize;
         titleSize = fit(title + "  " + next.time, titleSize, width,
@@ -701,8 +953,8 @@ public final class BoardView extends View {
         String title = media == null || media.title == null ? DASH : media.title;
         String artist = media == null || media.artist == null ? "" : media.artist;
         boolean playing = media != null && media.playing;
-        float titleSize = Math.min(19f * unit(), r.height() * .19f);
-        float artistSize = Math.min(13f * unit(), r.height() * .14f);
+        float titleSize = Math.min(19f * unit(), r.height() * .19f) * .75f;
+        float artistSize = Math.min(13f * unit(), r.height() * .14f) * .80f;
         float textTop = r.top + r.height() * .23f;
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setTypeface(Fonts.semibold(getContext()));
@@ -729,15 +981,29 @@ public final class BoardView extends View {
             text(canvas, artist, x, artistY, artistSize, SAGE,
                     Fonts.regular(getContext()), width);
         }
-        if (playing && media.duration > 0) {
-            long position = media.position;
-            if (media.updatedAt > 0) {
-                position += (long) ((SystemClock.elapsedRealtime() - media.updatedAt)
-                        * media.speed);
+    }
+
+    private void drawProgress(Canvas canvas) {
+        if (!isMediaPlaying() || media.duration <= 0) {
+            return;
+        }
+        for (BoardLayout.Card card : layout.cards) {
+            if (!"media".equals(card.type)) {
+                continue;
             }
+            RectF bounds = bounds(card);
+            float pad = Math.max(2f * unit(),
+                    Math.min(bounds.width(), bounds.height()) * .08f);
+            RectF r = new RectF(bounds.left + pad, bounds.top + pad,
+                    bounds.right - pad, bounds.bottom - pad);
+            float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
+            float x = r.left + artworkSize + 10f * unit();
+            float width = Math.max(1f, r.right - x);
             float progress = Math.max(0f, Math.min(1f,
-                    (float) position / media.duration));
+                    (float) media.estimatedPositionMs() / media.duration));
             float lineY = r.bottom - 3f * unit();
+            canvas.save();
+            canvas.clipPath(cardPath(card.type, bounds));
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(1.5f, r.height() * .015f));
             paint.setStrokeCap(Paint.Cap.ROUND);
@@ -760,6 +1026,7 @@ public final class BoardView extends View {
             wave.lineTo(end, lineY);
             canvas.drawPath(wave, paint);
             paint.setStyle(Paint.Style.FILL);
+            canvas.restore();
         }
     }
 
@@ -770,7 +1037,9 @@ public final class BoardView extends View {
         String range = battery != null && battery.rangeMeters >= 0
                 ? words.getString(R.string.board_range_km,
                         Math.round(battery.rangeMeters / 1000f))
-                : valid ? DASH : words.getString(R.string.board_no_car_data);
+                : valid ? DASH : battery == null
+                        ? words.getString(R.string.board_no_car_data)
+                        : battery.shortReason(words);
         float secondary = Math.min(14f * unit(), r.height() * .18f);
         float size = fit(value, Math.min((valid ? 32f : 18f) * unit(),
                 r.height() * (valid ? .40f : .18f)), r.width(),
@@ -974,7 +1243,7 @@ public final class BoardView extends View {
                 }
                 Store.prefs(getContext()).edit()
                         .putString(Store.layoutKey(mode), layout.toJson()).apply();
-                invalidate();
+                invalidateStatic();
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:

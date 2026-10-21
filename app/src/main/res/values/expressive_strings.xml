@@ -8,6 +8,7 @@
     <string name="colours">Colours</string>
     <string-array name="colour_sources">
         <item>Wallpaper</item>
+        <item>Background</item>
         <item>Album art</item>
         <item>Teal</item>
         <item>Emerald</item>

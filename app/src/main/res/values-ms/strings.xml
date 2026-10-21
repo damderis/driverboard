@@ -22,4 +22,9 @@
 <string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
 <string name="unavailable">Tidak tersedia</string>
 <string name="no_car_data">Tiada data daripada kereta</string>
+<string name="battery_reason_permission">Kebenaran data kereta ditolak. Benarkan dalam Android Auto untuk melihat bateri dan jarak.</string>
+<string name="battery_reason_not_electric">Kereta ini tidak melaporkan bateri elektrik.</string>
+<string name="battery_reason_not_sharing">Kereta ini tidak berkongsi data bateri atau jarak dengan Android Auto.</string>
+<string name="battery_reason_ok">Menunggu bacaan bateri daripada kereta.</string>
+<string name="battery_reason_waiting">Sambungkan ke kereta untuk menyemak bateri dan jarak.</string>
 </resources>

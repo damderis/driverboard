@@ -17,6 +17,11 @@
     <string name="prayer_tomorrow_waiting">Tomorrow’s times after midnight</string>
     <string name="prayer_malaysia_time">Malaysia time</string>
     <string name="battery_unsupported">Car battery unavailable</string>
+    <string name="battery_reason_permission_short">Car data permission denied</string>
+    <string name="battery_reason_not_electric_short">No electric battery reported</string>
+    <string name="battery_reason_not_sharing_short">Car is not sharing battery data</string>
+    <string name="battery_reason_ok_short">Waiting for battery data</string>
+    <string name="battery_reason_waiting_short">Connect car for battery data</string>
     <string name="media_grant_access">Grant access on phone</string>
     <string name="media_notification_required">Notification access required</string>
     <string name="media_playing">Playing</string>

@@ -52,10 +52,10 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     private TextView removeBackground;
     private long thumbnailVersion = Long.MIN_VALUE;
     private static final String[] COLOUR_VALUES = {
-            "wallpaper", "album", "teal", "emerald", "navy", "maroon", "graphite"
+            "wallpaper", "background", "album", "teal", "emerald", "navy", "maroon", "graphite"
     };
     private static final int[] PRESET_COLOURS = {
-            0, 0, 0xFF0F6E6E, 0xFF3FB978, 0xFF688FCB, 0xFFC36B82, 0xFF818A91
+            0, 0, 0, 0xFF0F6E6E, 0xFF3FB978, 0xFF688FCB, 0xFFC36B82, 0xFF818A91
     };
 
     private final Handler handler = new Handler();
@@ -376,8 +376,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
                 BackgroundStore.remove(this);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed()) {
-                        updateStates();
-                        board.refresh();
+                        recreate();
                     }
                 });
             } catch (Exception error) {
@@ -427,8 +426,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
                 BackgroundStore.importSource(this, uri);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed()) {
-                        updateStates();
-                        board.refresh();
+                        recreate();
                     }
                 });
             } catch (Exception error) {
@@ -482,7 +480,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
             chip.setTextColor(toggleForeground());
             chip.setChipStrokeWidth(dp(1));
             chip.setChipStrokeColor(ColorStateList.valueOf(hairline));
-            if (index >= 2) {
+            if (index >= 3) {
                 chip.setChipIconResource(R.drawable.ic_colour_dot);
                 chip.setChipIconTint(ColorStateList.valueOf(PRESET_COLOURS[index]));
                 chip.setChipIconVisible(true);
@@ -681,12 +679,13 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
                 : WidgetData.zone(this) + " · " + WidgetData.zoneName(this));
         long at = prefs.getLong("battery_at", 0);
         if (at == 0) {
-            boolean unavailable = prefs.getBoolean("battery_unsupported", false);
+            WidgetData.BatterySnapshot battery = WidgetData.battery(this);
+            boolean unavailable = "unsupported".equals(battery.status);
             batteryValue.setText(unavailable ? R.string.unavailable : R.string.waiting);
             batteryValue.setTextColor(unavailable ? muted : night ? 0xFFE5BC6B : 0xFF8A6100);
-            batteryDetail.setText(unavailable ? R.string.no_car_data
-                    : R.string.battery_next_drive);
+            batteryDetail.setText(WidgetData.batteryReason(this, battery.reason, false));
             batteryDetail.setAlpha(1f);
+            batteryDetail.setTextColor(muted);
         } else {
             String pct = prefs.contains("battery_pct")
                     ? String.format(AppLocale.locale(this), "%.0f%%", prefs.getFloat("battery_pct", 0))
@@ -697,9 +696,14 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
             String when = new SimpleDateFormat("HH:mm", AppLocale.locale(this))
                     .format(new Date(at));
             batteryValue.setText("");
-            batteryDetail.setText(getString(R.string.battery_summary, pct, range,
+            String summary = getString(R.string.battery_summary, pct, range,
                     System.currentTimeMillis() - at > 1800000
-                            ? getString(R.string.updated, when) : when));
+                            ? getString(R.string.updated, when) : when);
+            String reason = prefs.getString("battery_reason", "ok");
+            if (!"ok".equals(reason) && !"waiting".equals(reason)) {
+                summary += "\n" + WidgetData.batteryReason(this, reason, false);
+            }
+            batteryDetail.setText(summary);
             batteryDetail.setAlpha(1f);
             batteryDetail.setTextColor(muted);
         }

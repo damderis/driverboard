@@ -8,6 +8,7 @@
     <string name="colours">Warna</string>
     <string-array name="colour_sources">
         <item>Kertas dinding</item>
+        <item>Latar belakang</item>
         <item>Seni album</item>
         <item>Teal</item>
         <item>Zamrud</item>

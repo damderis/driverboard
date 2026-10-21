@@ -96,8 +96,11 @@ public final class BackgroundStore {
                 throw new IOException("Cannot save background");
             }
             long last = Store.prefs(context).getLong("background_at", 0);
-            Store.prefs(context).edit().putLong("background_at",
-                    Math.max(System.currentTimeMillis(), last + 1)).commit();
+            SharedPreferences prefs = Store.prefs(context);
+            SharedPreferences.Editor edit = prefs.edit().putLong("background_at",
+                    Math.max(System.currentTimeMillis(), last + 1));
+            edit.putString("colour_source", "background");
+            edit.commit();
             synchronized (BackgroundStore.class) {
                 cachedVersion = Long.MIN_VALUE;
             }
@@ -116,7 +119,12 @@ public final class BackgroundStore {
             if (file.exists() && !file.delete()) {
                 throw new IOException("Cannot remove background");
             }
-            Store.prefs(context).edit().remove("background_at").commit();
+            SharedPreferences prefs = Store.prefs(context);
+            SharedPreferences.Editor edit = prefs.edit().remove("background_at");
+            if ("background".equals(prefs.getString("colour_source", "wallpaper"))) {
+                edit.putString("colour_source", "wallpaper");
+            }
+            edit.commit();
             synchronized (BackgroundStore.class) {
                 cached = null;
                 cachedVersion = Long.MIN_VALUE;

@@ -22,4 +22,9 @@
 <string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
 <string name="unavailable">Unavailable</string>
 <string name="no_car_data">No data from car</string>
+<string name="battery_reason_permission">Car data permission was denied. Allow it in Android Auto to show battery and range.</string>
+<string name="battery_reason_not_electric">This car did not report an electric battery.</string>
+<string name="battery_reason_not_sharing">This car is not sharing battery or range data with Android Auto.</string>
+<string name="battery_reason_ok">Waiting for a battery reading from the car.</string>
+<string name="battery_reason_waiting">Connect to your car to check battery and range.</string>
 </resources>

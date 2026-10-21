@@ -17,6 +17,11 @@
     <string name="prayer_tomorrow_waiting">Waktu esok selepas tengah malam</string>
     <string name="prayer_malaysia_time">Waktu Malaysia</string>
     <string name="battery_unsupported">Bateri kereta tidak tersedia</string>
+    <string name="battery_reason_permission_short">Kebenaran data kereta ditolak</string>
+    <string name="battery_reason_not_electric_short">Tiada bateri elektrik dilaporkan</string>
+    <string name="battery_reason_not_sharing_short">Kereta tidak berkongsi data bateri</string>
+    <string name="battery_reason_ok_short">Menunggu data bateri</string>
+    <string name="battery_reason_waiting_short">Sambung kereta untuk data bateri</string>
     <string name="media_grant_access">Benarkan akses pada telefon</string>
     <string name="media_notification_required">Akses pemberitahuan diperlukan</string>
     <string name="media_playing">Sedang dimainkan</string>

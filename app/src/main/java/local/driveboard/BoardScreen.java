@@ -52,9 +52,7 @@ public final class BoardScreen extends Screen {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            if (!lyricsVisible) {
-                drawBoard();
-            }
+            drawBoard();
             if (started) {
                 scheduleTick();
             }
@@ -81,6 +79,77 @@ public final class BoardScreen extends Screen {
         }
     };
 
+    private SurfaceCallback surfaceCallback;
+    private int consecutiveFailures;
+    private long lastRecovery = -5000;
+    private String lastEnergyLog = "";
+    private long lastEnergyLogAt;
+    private final android.view.Choreographer.FrameCallback frameCallback = this::onFrame;
+    private long lastFrame;
+    private boolean frameScheduled;
+    private int slowFrames;
+    private int fps = 30;
+    private long lastRefresh;
+    private boolean refreshNeeded = true;
+
+    private void onFrame(long nanos) {
+        frameScheduled = false;
+        if (!started || surface == null || !surface.isValid() || !board.isMediaPlaying()) {
+            return;
+        }
+        if (nanos - lastFrame >= 1_000_000_000L / fps) {
+            lastFrame = nanos;
+            long start = android.os.SystemClock.elapsedRealtimeNanos();
+            drawBoard();
+            long duration = android.os.SystemClock.elapsedRealtimeNanos() - start;
+            slowFrames = duration > 33_000_000 ? slowFrames + 1 : 0;
+            if (slowFrames >= 3 && fps != 15) {
+                fps = 15;
+                CarDiagnostics.log(getCarContext(), "Car frame budget exceeded; dropping to 15 fps");
+            }
+        }
+        scheduleFrame();
+    }
+
+    private void scheduleFrame() {
+        if (started && surface != null && board.isMediaPlaying() && !frameScheduled) {
+            frameScheduled = true;
+            android.view.Choreographer.getInstance().postFrameCallback(frameCallback);
+        }
+    }
+
+    private void drawFailed(RuntimeException error) {
+        consecutiveFailures++;
+        if (consecutiveFailures == 1 || consecutiveFailures % 10 == 0) {
+            CarDiagnostics.log(getCarContext(), "Draw failure " + error.getClass().getName()
+                    + ": " + error.getMessage() + " consecutive=" + consecutiveFailures);
+        }
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (consecutiveFailures >= 3 && now - lastRecovery >= 5000) {
+            lastRecovery = now;
+            handler.post(() -> {
+                if (!started) {
+                    return;
+                }
+                CarDiagnostics.log(getCarContext(), "Re-registering surface callback after failures");
+                try {
+                    AppManager manager = getCarContext().getCarService(AppManager.class);
+                    manager.setSurfaceCallback(null);
+                    manager.setSurfaceCallback(surfaceCallback);
+                } catch (RuntimeException failure) {
+                    CarDiagnostics.log(getCarContext(), "Surface recovery failed: " + failure);
+                }
+            });
+        }
+    }
+
+    private void batteryReason(String reason) {
+        prefs.edit().remove("battery_pct").remove("range_m").remove("battery_at")
+                .putString("battery_reason", reason)
+                .putBoolean("battery_unsupported", !"ok".equals(reason) && !"waiting".equals(reason))
+                .apply();
+    }
+
     private SurfaceContainer container;
     private Surface surface;
     private Rect visibleArea = new Rect();
@@ -103,6 +172,7 @@ public final class BoardScreen extends Screen {
         super(carContext);
         prefs = Store.prefs(carContext);
         board = new BoardView(carContext);
+        board.setFrameRequestHook(this::requestDraw);
         getLifecycle().addObserver((LifecycleEventObserver) (source, event) -> {
             if (event == Lifecycle.Event.ON_START) {
                 startRendering();
@@ -135,7 +205,7 @@ public final class BoardScreen extends Screen {
         started = true;
         prefs.registerOnSharedPreferenceChangeListener(prefsListener);
         final long epoch = ++callbackEpoch;
-        getCarContext().getCarService(AppManager.class).setSurfaceCallback(new SurfaceCallback() {
+        surfaceCallback = new SurfaceCallback() {
             @Override
             public void onSurfaceAvailable(@NonNull SurfaceContainer next) {
                 onAvailable(epoch, next);
@@ -156,7 +226,12 @@ public final class BoardScreen extends Screen {
             public void onClick(float x, float y) {
                 onSurfaceClick(epoch, x, y);
             }
-        });
+        };
+        try {
+            getCarContext().getCarService(AppManager.class).setSurfaceCallback(surfaceCallback);
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(getCarContext(), "Surface registration failed: " + error);
+        }
         if (getCarContext().getCarAppApiLevel() < 5) {
             Log.i(CAR_TAG, "Surface taps need car API 5; use the Lyrics action");
         }
@@ -173,6 +248,8 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = false;
+        android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
+        frameScheduled = false;
         drawQueued = false;
         handler.removeCallbacks(tick);
         handler.removeCallbacks(lyricsTick);
@@ -181,7 +258,11 @@ public final class BoardScreen extends Screen {
         board.setLyrics(null);
         board.setLyricsLoading(false);
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener);
-        getCarContext().getCarService(AppManager.class).setSurfaceCallback(null);
+        try {
+            getCarContext().getCarService(AppManager.class).setSurfaceCallback(null);
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(getCarContext(), "Surface unregistration failed: " + error);
+        }
         stopCarEnergy();
         releaseSurface();
     }
@@ -197,6 +278,7 @@ public final class BoardScreen extends Screen {
             handler.post(this::requestDraw);
             return;
         }
+        refreshNeeded = true;
         if (drawQueued) {
             return;
         }
@@ -216,12 +298,17 @@ public final class BoardScreen extends Screen {
             return;
         }
         // The host owns these surfaces; releasing one it still renders to aborts RenderThread.
+        CarDiagnostics.log(getCarContext(), "Surface available " + nextContainer.getWidth()
+                + "x" + nextContainer.getHeight() + " dpi=" + nextContainer.getDpi());
         Surface nextSurface = nextContainer.getSurface();
         lastDrawArea.setEmpty();
         visibleArea.setEmpty();
         stableArea.setEmpty();
         container = nextContainer;
         surface = nextSurface;
+        fps = 30;
+        slowFrames = 0;
+        refreshNeeded = true;
         if (nextContainer.getWidth() > 0 && nextContainer.getHeight() > 0) {
             prefs.edit()
                     .putInt("surface_width", nextContainer.getWidth())
@@ -243,6 +330,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch) {
             return;
         }
+        CarDiagnostics.log(getCarContext(), "Visible area=" + area);
         visibleArea = new Rect(area);
         drawBoard();
     }
@@ -255,6 +343,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch) {
             return;
         }
+        CarDiagnostics.log(getCarContext(), "Stable area=" + area);
         stableArea = new Rect(area);
         drawBoard();
     }
@@ -264,6 +353,7 @@ public final class BoardScreen extends Screen {
             handler.post(() -> onDestroyed(epoch, destroyedContainer));
             return;
         }
+        CarDiagnostics.log(getCarContext(), "Surface destroyed");
         Surface destroyed = destroyedContainer.getSurface();
         if (!started || epoch != callbackEpoch || surface == null) {
             return;
@@ -287,11 +377,23 @@ public final class BoardScreen extends Screen {
     }
 
     private void drawBoard() {
+        try {
+            drawBoardInternal();
+        } catch (RuntimeException error) {
+            drawFailed(error);
+        }
+    }
+
+    private void drawBoardInternal() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             handler.post(this::drawBoard);
             return;
         }
-        if (!started || container == null || surface == null || !surface.isValid()) {
+        if (!started || container == null || surface == null) {
+            return;
+        }
+        if (!surface.isValid()) {
+            drawFailed(new IllegalStateException("Host surface invalid"));
             return;
         }
 
@@ -322,28 +424,35 @@ public final class BoardScreen extends Screen {
         }
         boolean night = getCarContext().isDarkMode();
         if (lastNight == null || lastNight != night) {
-            Log.i(CAR_TAG, "Night mode=" + night);
+            CarDiagnostics.log(getCarContext(), "Night mode=" + night);
             lastNight = night;
         }
         if (!mode.equals(lastMode) || drawWidth != lastDrawWidth || drawHeight != lastDrawHeight) {
-            Log.i(CAR_TAG, "Layout mode=" + mode + " draw=" + drawWidth + "x" + drawHeight);
+            CarDiagnostics.log(getCarContext(), "Layout mode=" + mode + " draw=" + drawWidth + "x" + drawHeight);
             lastMode = mode;
             lastDrawWidth = drawWidth;
             lastDrawHeight = drawHeight;
         }
         board.setMode(mode);
         board.setCarNight(night);
-        board.refresh();
-        if (lyricsVisible) {
-            updateLyrics();
+        long refreshNow = android.os.SystemClock.elapsedRealtime();
+        if (refreshNeeded || refreshNow - lastRefresh >= 1000) {
+            refreshNeeded = false;
+            lastRefresh = refreshNow;
+            board.refresh();
+            if (lyricsVisible) {
+                updateLyrics();
+            }
         }
         int measuredWidth = View.MeasureSpec.makeMeasureSpec(drawArea.width(), View.MeasureSpec.EXACTLY);
         int measuredHeight = View.MeasureSpec.makeMeasureSpec(drawArea.height(), View.MeasureSpec.EXACTLY);
         board.measure(measuredWidth, measuredHeight);
         board.layout(0, 0, drawArea.width(), drawArea.height());
 
+        scheduleFrame();
         Surface drawingSurface = surface;
         Canvas canvas = null;
+        boolean drawn = false;
         try {
             if (!drawingSurface.isValid()) {
                 return;
@@ -357,14 +466,18 @@ public final class BoardScreen extends Screen {
             canvas.translate(drawArea.left, drawArea.top);
             board.draw(canvas);
             canvas.restoreToCount(save);
+            drawn = true;
         } catch (RuntimeException e) {
-            Log.w(TAG, "Could not draw car surface", e);
+            drawFailed(e);
         } finally {
             if (canvas != null) {
                 try {
                     drawingSurface.unlockCanvasAndPost(canvas);
+                    if (drawn) {
+                        consecutiveFailures = 0;
+                    }
                 } catch (RuntimeException e) {
-                    Log.w(TAG, "Surface detached while posting frame", e);
+                    drawFailed(e);
                 }
             }
         }
@@ -398,6 +511,7 @@ public final class BoardScreen extends Screen {
         }
         lyricsVisible = !lyricsVisible;
         board.setLyricsVisible(lyricsVisible);
+        refreshNeeded = true;
         if (lyricsVisible) {
             lyricsTrackKey = "";
             board.setLyrics(null);
@@ -435,10 +549,12 @@ public final class BoardScreen extends Screen {
     private void startCarEnergy() {
         try {
             int level = getCarContext().getCarAppApiLevel();
-            Log.i(CAR_TAG, "Host car API level=" + level);
+            CarDiagnostics.log(getCarContext(), "Host car API level=" + level
+                    + " fuel permission=" + getCarContext().checkSelfPermission(CAR_FUEL));
+            batteryReason("waiting");
             if (level < 3) {
                 Log.i(CAR_TAG, "Energy requires car API 3");
-                prefs.edit().putBoolean("battery_unsupported", true).apply();
+                batteryReason("car_not_sharing");
                 return;
             }
             carInfo = getCarContext().getCarService(CarHardwareManager.class).getCarInfo();
@@ -447,8 +563,8 @@ public final class BoardScreen extends Screen {
             carInfo.fetchEnergyProfile(getCarContext().getMainExecutor(),
                     profile -> onEnergyProfile(epoch, requestedInfo, profile));
         } catch (RuntimeException | LinkageError e) {
-            Log.w(CAR_TAG, "Energy profile unavailable", e);
-            prefs.edit().putBoolean("battery_unsupported", true).apply();
+            CarDiagnostics.log(getCarContext(), "Energy profile unavailable: " + e);
+            batteryReason("car_not_sharing");
         }
     }
 
@@ -456,7 +572,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch || carInfo != requestedInfo || profile == null) {
             return;
         }
-        Log.i(CAR_TAG, "Energy profile fuel status=" + profile.getFuelTypes().getStatus()
+        CarDiagnostics.log(getCarContext(), "Energy profile fuel status=" + profile.getFuelTypes().getStatus()
                 + " value=" + profile.getFuelTypes().getValue() + " connector status="
                 + profile.getEvConnectorTypes().getStatus() + " value="
                 + profile.getEvConnectorTypes().getValue());
@@ -464,17 +580,29 @@ public final class BoardScreen extends Screen {
                 && profile.getFuelTypes().getValue().contains(EnergyProfile.FUEL_TYPE_ELECTRIC);
         boolean connector = success(profile.getEvConnectorTypes())
                 && !profile.getEvConnectorTypes().getValue().isEmpty();
-        if (!electric && !connector) {
-            Log.i(CAR_TAG, "EV profile absent; energy listener not started");
-            prefs.edit().putBoolean("battery_unsupported", true).apply();
+        if (!electric && !connector && success(profile.getFuelTypes())
+                && success(profile.getEvConnectorTypes())) {
+            CarDiagnostics.log(getCarContext(), "EV profile absent; energy listener not started");
+            batteryReason("not_electric");
             return;
+        }
+        if (profile.getFuelTypes().getStatus() == CarValue.STATUS_UNAVAILABLE
+                || profile.getFuelTypes().getStatus() == CarValue.STATUS_UNIMPLEMENTED
+                || profile.getEvConnectorTypes().getStatus() == CarValue.STATUS_UNAVAILABLE
+                || profile.getEvConnectorTypes().getStatus() == CarValue.STATUS_UNIMPLEMENTED) {
+            batteryReason("car_not_sharing");
         }
         // Android Auto grants car-data permissions only at runtime.
         if (getCarContext().checkSelfPermission(CAR_FUEL) != PackageManager.PERMISSION_GRANTED) {
-            Log.i(CAR_TAG, "Requesting " + CAR_FUEL);
+            batteryReason("permission_denied");
+            CarDiagnostics.log(getCarContext(), "Requesting " + CAR_FUEL);
             getCarContext().requestPermissions(Collections.singletonList(CAR_FUEL),
                     (granted, rejected) -> {
-                        Log.i(CAR_TAG, "Fuel permission granted=" + granted.contains(CAR_FUEL));
+                        CarDiagnostics.log(getCarContext(), "Fuel permission granted=" + granted + " rejected=" + rejected);
+                        if (!started || epoch != callbackEpoch) {
+                            return;
+                        }
+                        batteryReason(granted.contains(CAR_FUEL) ? "waiting" : "permission_denied");
                         if (granted.contains(CAR_FUEL)) {
                             startEnergyListener(epoch, requestedInfo);
                         }
@@ -495,7 +623,8 @@ public final class BoardScreen extends Screen {
             prefs.edit().putBoolean("battery_unsupported", false).apply();
             Log.i(CAR_TAG, "EV energy listener started");
         } catch (RuntimeException | LinkageError e) {
-            Log.w(CAR_TAG, "Energy listener unavailable", e);
+            CarDiagnostics.log(getCarContext(), "Energy listener unavailable: " + e);
+            batteryReason("car_not_sharing");
         }
     }
 
@@ -510,9 +639,15 @@ public final class BoardScreen extends Screen {
         }
         CarValue<Float> battery = level.getBatteryPercent();
         CarValue<Float> range = level.getRangeRemainingMeters();
-        Log.i(CAR_TAG, "Energy level battery status=" + battery.getStatus() + " value="
+        String energy = "Energy level battery status=" + battery.getStatus() + " value="
                 + battery.getValue() + " range status=" + range.getStatus() + " value="
-                + range.getValue());
+                + range.getValue();
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!energy.equals(lastEnergyLog) || now - lastEnergyLogAt >= 60000) {
+            CarDiagnostics.log(getCarContext(), energy);
+            lastEnergyLog = energy;
+            lastEnergyLogAt = now;
+        }
         SharedPreferences.Editor edit = prefs.edit();
         boolean have = false;
         if (success(battery) && Float.isFinite(battery.getValue())
@@ -530,12 +665,20 @@ public final class BoardScreen extends Screen {
             edit.remove("range_m");
         }
         if (have) {
+            edit.putString("battery_reason", success(battery) && Float.isFinite(battery.getValue())
+                    && battery.getValue() >= 0 && battery.getValue() <= 100
+                    ? "ok" : battery.getStatus() == CarValue.STATUS_UNAVAILABLE
+                            || battery.getStatus() == CarValue.STATUS_UNIMPLEMENTED
+                            ? "car_not_sharing" : "waiting");
             edit.putLong("battery_at", System.currentTimeMillis())
                     .putBoolean("battery_unsupported", false).apply();
             Log.i(CAR_TAG, "Energy level updated");
             requestDraw();
         } else {
-            edit.remove("battery_at").apply();
+            edit.remove("battery_at").putString("battery_reason",
+                    battery.getStatus() == CarValue.STATUS_UNAVAILABLE
+                            || battery.getStatus() == CarValue.STATUS_UNIMPLEMENTED
+                            ? "car_not_sharing" : "waiting").apply();
             Log.i(CAR_TAG, "Energy level has no successful battery or range values");
         }
     }

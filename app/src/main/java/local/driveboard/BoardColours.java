@@ -30,6 +30,8 @@ public final class BoardColours {
     public final int onPrimary;
     public final int onPrimaryContainer;
     public final int outlineVariant;
+    /** Opacity for containers drawn over a user picture. */
+    public final int containerAlpha;
 
     private BoardColours(int seed) {
         this.seed = seed | 0xFF000000;
@@ -50,6 +52,7 @@ public final class BoardColours {
                 secondaryContainer, tertiaryContainer};
         onSurface = accessible(scheme.getOnSurface(), scheme, containers);
         onSurfaceVariant = accessible(scheme.getOnSurfaceVariant(), scheme, containers);
+        containerAlpha = readableContainerAlpha(containers, onSurface, onSurfaceVariant);
     }
 
     public static synchronized BoardColours fromSeed(int seed) {
@@ -73,12 +76,14 @@ public final class BoardColours {
     public static BoardColours current(Context context, Bitmap albumArt) {
         String source = Store.prefs(context).getString("colour_source", "wallpaper");
         int seed;
-        if ("album".equals(source) && albumArt != null && !albumArt.isRecycled()) {
+        Bitmap artwork = "background".equals(source) ? BackgroundStore.load(context) : albumArt;
+        if (("album".equals(source) || "background".equals(source))
+                && artwork != null && !artwork.isRecycled()) {
             synchronized (ART_SEEDS) {
-                Integer cached = ART_SEEDS.get(albumArt);
+                Integer cached = ART_SEEDS.get(artwork);
                 if (cached == null) {
-                    cached = artSeed(albumArt);
-                    ART_SEEDS.put(albumArt, cached);
+                    cached = artSeed(artwork);
+                    ART_SEEDS.put(artwork, cached);
                 }
                 seed = cached;
             }
@@ -137,6 +142,41 @@ public final class BoardColours {
             }
         }
         return true;
+    }
+
+    public int translucentContainer(int opaqueContainer) {
+        return (containerAlpha << 24) | (opaqueContainer & 0x00FFFFFF);
+    }
+
+    private static int readableContainerAlpha(int[] containers, int text, int secondaryText) {
+        for (int alpha = 209; alpha <= 255; alpha++) {
+            boolean readable = true;
+            for (int container : containers) {
+                int overWhite = composite(container, 0xFFFFFFFF, alpha);
+                int overBlack = composite(container, 0xFF000000, alpha);
+                if (contrast(text, overWhite) < 4.5 || contrast(text, overBlack) < 4.5
+                        || contrast(secondaryText, overWhite) < 4.5
+                        || contrast(secondaryText, overBlack) < 4.5) {
+                    readable = false;
+                    break;
+                }
+            }
+            if (readable) {
+                return alpha;
+            }
+        }
+        return 255;
+    }
+
+    /** Matches an 8-bit SRC_OVER fill on an opaque picture pixel. */
+    static int composite(int foreground, int background, int alpha) {
+        int inverse = 255 - alpha;
+        int red = (((foreground >>> 16) & 255) * alpha
+                + ((background >>> 16) & 255) * inverse + 127) / 255;
+        int green = (((foreground >>> 8) & 255) * alpha
+                + ((background >>> 8) & 255) * inverse + 127) / 255;
+        int blue = ((foreground & 255) * alpha + (background & 255) * inverse + 127) / 255;
+        return 0xFF000000 | red << 16 | green << 8 | blue;
     }
 
     public static double contrast(int a, int b) {
