@@ -10,7 +10,6 @@
 <string name="car_battery">Bateri kereta</string>
 <string name="battery_next_drive">Daripada kereta pada perjalanan seterusnya</string>
 <string name="waiting">Menunggu</string>
-<string name="colour_tone">Tona warna</string>
 <string name="language">Bahasa</string>
 <string name="english">English</string>
 <string name="malay">Bahasa Melayu</string>
@@ -19,7 +18,6 @@
 <string name="updated">dikemas kini %1$s</string>
 <string name="locating">Mencari zon solat…</string>
 <string name="location_unavailable">Lokasi tidak tersedia — pilih zon</string>
-<string-array name="tone_names"><item>Teal</item><item>Zamrud</item><item>Biru tua</item><item>Merah manggis</item><item>Grafit</item></string-array>
 <string name="phone_range_km">%1$d km</string>
 <string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
 <string name="unavailable">Tidak tersedia</string>

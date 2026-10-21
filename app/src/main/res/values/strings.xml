@@ -10,7 +10,6 @@
 <string name="car_battery">Car battery</string>
 <string name="battery_next_drive">From the car on next drive</string>
 <string name="waiting">Waiting</string>
-<string name="colour_tone">Colour tone</string>
 <string name="language">Language</string>
 <string name="english">English</string>
 <string name="malay">Bahasa Melayu</string>
@@ -19,7 +18,6 @@
 <string name="updated">updated %1$s</string>
 <string name="locating">Finding prayer zone…</string>
 <string name="location_unavailable">Location unavailable — pick a zone</string>
-<string-array name="tone_names"><item>Teal</item><item>Emerald</item><item>Navy</item><item>Maroon</item><item>Graphite</item></string-array>
 <string name="phone_range_km">%1$d km</string>
 <string name="battery_summary">%1$s &#183; %2$s &#183; %3$s</string>
 <string name="unavailable">Unavailable</string>

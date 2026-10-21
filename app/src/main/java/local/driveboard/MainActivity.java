@@ -9,7 +9,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
-import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.provider.MediaStore;
 import android.widget.ImageView;
@@ -24,7 +23,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -33,13 +31,13 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 public final class MainActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
-    private static final int PICK_CAR = 20;
+    private static final int PICK_BACKGROUND = 20;
     private final ExecutorService pictureWorker = Executors.newSingleThreadExecutor();
-    private ImageView carThumbnail;
-    private TextView carPlaceholder;
+    private ImageView backgroundThumbnail;
+    private TextView backgroundPlaceholder;
+    private TextView removeBackground;
     private long thumbnailVersion = Long.MIN_VALUE;
     private static final int CREAM = 0xFFF4EFE4;
-    private static final int FAINT_CREAM = 0x66F4EFE4;
 
     private final Handler handler = new Handler();
     private final Runnable tick = new Runnable() {
@@ -77,6 +75,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        BackgroundStore.cleanupLegacy(this);
         build();
     }
 
@@ -122,8 +121,8 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         addPrayerRow(card);
         addMediaRow(card);
         addBatteryRow(card);
-        addCarRow(card);
-        addToneRow(card, tone);
+        addBackgroundRow(card);
+        addColoursRow(card);
         addLanguageRow(card, tone);
         addFooter(content);
 
@@ -145,6 +144,7 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private void addBoard(LinearLayout content, Tone tone) {
         board = new BoardView(this);
+        board.setCarNight(night);
         board.setMode(selectedMode);
         board.setBackground(shape(tone.ground, 14));
         if (night) {
@@ -256,56 +256,69 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         battery.addView(batteryValue);
     }
 
-    private void addCarRow(LinearLayout card) {
-        LinearLayout car = row(card, true);
-        LinearLayout description = description(car, R.string.my_car);
-        carPlaceholder = detail(description, getString(R.string.no_picture));
-        carThumbnail = new ImageView(this);
-        carThumbnail.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        carThumbnail.setContentDescription(getString(R.string.my_car));
-        car.addView(carThumbnail, new LinearLayout.LayoutParams(dp(72), dp(48)));
+    private void addBackgroundRow(LinearLayout card) {
+        LinearLayout row = row(card, true);
+        LinearLayout description = description(row, R.string.background);
+        backgroundPlaceholder = detail(description, getString(R.string.no_picture));
+        backgroundThumbnail = new ImageView(this);
+        backgroundThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        backgroundThumbnail.setContentDescription(getString(R.string.background));
+        row.addView(backgroundThumbnail, new LinearLayout.LayoutParams(dp(56), dp(48)));
         TextView choose = text(getString(R.string.choose_picture), 12, true);
         choose.setTextColor(accent);
         choose.setGravity(Gravity.CENTER);
         choose.setMinHeight(dp(48));
         choose.setMinWidth(dp(48));
-        choose.setPadding(dp(12), 0, dp(12), 0);
-        choose.setOnClickListener(view -> chooseCarPicture());
-        car.addView(choose);
-        car.setOnClickListener(view -> {
-            if (CarPictureStore.sourceFile(this).isFile()) {
-                startActivity(new Intent(this, CarEditorActivity.class));
-            } else {
-                chooseCarPicture();
+        choose.setPadding(dp(8), 0, dp(8), 0);
+        choose.setOnClickListener(view -> chooseBackgroundPicture());
+        row.addView(choose);
+        removeBackground = text(getString(R.string.remove_picture), 12, true);
+        removeBackground.setTextColor(accent);
+        removeBackground.setGravity(Gravity.CENTER);
+        removeBackground.setMinHeight(dp(48));
+        removeBackground.setMinWidth(dp(48));
+        removeBackground.setOnClickListener(view -> pictureWorker.execute(() -> {
+            try {
+                BackgroundStore.remove(this);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        updateStates();
+                        board.refresh();
+                    }
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.picture_remove_failed, Toast.LENGTH_LONG).show());
             }
-        });
+        }));
+        row.addView(removeBackground);
         thumbnailVersion = Long.MIN_VALUE;
     }
 
-    private void chooseCarPicture() {
+    private void chooseBackgroundPicture() {
         Intent intent = new Intent(Build.VERSION.SDK_INT >= 33
                 ? MediaStore.ACTION_PICK_IMAGES : Intent.ACTION_GET_CONTENT);
         intent.setType("image/*");
         if (Build.VERSION.SDK_INT < 33) {
             intent.addCategory(Intent.CATEGORY_OPENABLE);
         }
-        startActivityForResult(intent, PICK_CAR);
+        startActivityForResult(intent, PICK_BACKGROUND);
     }
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request != PICK_CAR || result != RESULT_OK || data == null || data.getData() == null) {
+        if (request != PICK_BACKGROUND || result != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
         android.net.Uri uri = data.getData();
         pictureWorker.execute(() -> {
             try {
-                CarPictureStore.importSource(this, uri);
+                BackgroundStore.importSource(this, uri);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed()) {
                         updateStates();
-                        startActivity(new Intent(this, CarEditorActivity.class));
+                        board.refresh();
                     }
                 });
             } catch (Exception error) {
@@ -315,50 +328,30 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         });
     }
 
-    private void addToneRow(LinearLayout card, Tone tone) {
+    private void addColoursRow(LinearLayout card) {
         LinearLayout colours = row(card, true);
-        colours.setOrientation(LinearLayout.VERTICAL);
-        colours.setGravity(Gravity.START);
-        LinearLayout heading = new LinearLayout(this);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.addView(text(getString(R.string.colour_tone), 15, true),
-                new LinearLayout.LayoutParams(0, -2, 1));
-        TextView toneName = text(toneName(tone), 12, false);
-        toneName.setTextColor(muted);
-        heading.addView(toneName);
-        colours.addView(heading, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout swatches = new LinearLayout(this);
-        colours.addView(swatches, new LinearLayout.LayoutParams(-1, dp(48)));
-        for (Tone option : Tone.values()) {
-            addSwatch(swatches, option, tone);
+        LinearLayout description = description(colours, R.string.colours);
+        String[] values = {"wallpaper", "album", "teal", "emerald", "navy", "maroon", "graphite"};
+        String[] labels = getResources().getStringArray(R.array.colour_sources);
+        String selected = Store.prefs(this).getString("colour_source", "wallpaper");
+        int selectedIndex = 0;
+        for (int index = 0; index < values.length; index++) {
+            if (values[index].equals(selected)) {
+                selectedIndex = index;
+                break;
+            }
         }
-    }
-
-    private void addSwatch(LinearLayout swatches, Tone option, Tone tone) {
-        FrameLayout target = new FrameLayout(this);
-        target.setMinimumWidth(dp(48));
-        target.setContentDescription(toneName(option));
-        target.setSelected(option == tone);
-        View circle = new View(this);
-        GradientDrawable drawable = shape(option.ground, 24);
-        if (night) {
-            drawable.setStroke(dp(1), FAINT_CREAM);
-        }
-        circle.setBackground(drawable);
-        target.addView(circle, new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER));
-        if (option == tone) {
-            View ring = new View(this);
-            GradientDrawable outline = shape(Color.TRANSPARENT, 24);
-            outline.setStroke(dp(2), night ? CREAM : ink);
-            ring.setBackground(outline);
-            target.addView(ring, new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER));
-        }
-        swatches.addView(target, new LinearLayout.LayoutParams(0, dp(48), 1));
-        target.setOnClickListener(view -> {
-            Store.prefs(this).edit().putString("tone", option.id).apply();
-            build();
-            board.post(this::updateAspect);
-        });
+        detail(description, labels[selectedIndex]);
+        final int checked = selectedIndex;
+        colours.setOnClickListener(view -> new AlertDialog.Builder(this)
+                .setTitle(R.string.colours)
+                .setSingleChoiceItems(labels, checked, (dialog, index) -> {
+                    Store.prefs(this).edit().putString("colour_source", values[index]).apply();
+                    dialog.dismiss();
+                    build();
+                })
+                .setNegativeButton(R.string.cancel_action, null)
+                .show());
     }
 
     private void addLanguageRow(LinearLayout card, Tone tone) {
@@ -423,10 +416,6 @@ public final class MainActivity extends Activity implements SharedPreferences.On
 
     private int filledControlTextColor(Tone tone) {
         return night ? tone.ground : Color.WHITE;
-    }
-
-    private String toneName(Tone tone) {
-        return getResources().getStringArray(R.array.tone_names)[tone.ordinal()];
     }
 
     private LinearLayout column() {
@@ -504,14 +493,14 @@ public final class MainActivity extends Activity implements SharedPreferences.On
         allowed.setVisibility(access ? View.VISIBLE : View.GONE);
         grant.setVisibility(access ? View.GONE : View.VISIBLE);
         SharedPreferences prefs = Store.prefs(this);
-        long renderVersion = prefs.getLong("car_render_at", 0);
-        if (thumbnailVersion != renderVersion) {
-            thumbnailVersion = renderVersion;
-            boolean rendered = CarPictureStore.renderFile(this).isFile();
-            carThumbnail.setImageBitmap(rendered ? BitmapFactory.decodeFile(
-                    CarPictureStore.renderFile(this).getAbsolutePath()) : null);
-            carThumbnail.setVisibility(rendered ? View.VISIBLE : View.GONE);
-            carPlaceholder.setVisibility(rendered ? View.GONE : View.VISIBLE);
+        long backgroundVersion = prefs.getLong("background_at", 0);
+        if (thumbnailVersion != backgroundVersion) {
+            thumbnailVersion = backgroundVersion;
+            android.graphics.Bitmap image = BackgroundStore.load(this);
+            backgroundThumbnail.setImageBitmap(image);
+            backgroundThumbnail.setVisibility(image != null ? View.VISIBLE : View.GONE);
+            backgroundPlaceholder.setVisibility(image != null ? View.GONE : View.VISIBLE);
+            removeBackground.setVisibility(image != null ? View.VISIBLE : View.GONE);
         }
         zoneDetail.setText(locationMessage != null ? locationMessage
                 : WidgetData.zone(this) + " · " + WidgetData.zoneName(this));

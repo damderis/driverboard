@@ -5,8 +5,10 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.os.SystemClock;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
+import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import java.net.HttpURLConnection;
@@ -34,6 +36,9 @@ public final class WidgetData {
     private static String inFlight = "";
     private static String lastAttempt = "";
     private static long retryAfter;
+    private static String cachedArtTrack = "";
+    private static MediaSession.Token cachedArtSession;
+    private static Bitmap cachedArt;
 
     private WidgetData() {}
 
@@ -93,23 +98,34 @@ public final class WidgetData {
     public static final class MediaSnapshot {
         public final String title;
         public final String artist;
+        public final String album;
         public final Bitmap art;
         public final long duration;
         public final long position;
         public final long updatedAt;
         public final float speed;
         public final boolean playing;
+        public final boolean hasTrack;
 
-        public MediaSnapshot(String title, String artist, Bitmap art, long duration,
-                long position, long updatedAt, float speed, boolean playing) {
+        public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
+                long position, long updatedAt, float speed, boolean playing, boolean hasTrack) {
             this.title = title;
             this.artist = artist;
+            this.album = album;
             this.art = art;
             this.duration = duration;
             this.position = position;
             this.updatedAt = updatedAt;
             this.speed = speed;
             this.playing = playing;
+            this.hasTrack = hasTrack;
+        }
+
+        public long estimatedPositionMs() {
+            long elapsed = playing && updatedAt > 0
+                    ? Math.max(0, SystemClock.elapsedRealtime() - updatedAt) : 0;
+            long estimate = Math.max(0, position + Math.round(elapsed * speed));
+            return duration > 0 ? Math.min(duration, estimate) : estimate;
         }
     }
 
@@ -117,45 +133,87 @@ public final class WidgetData {
         Context lc = AppLocale.wrap(c);
         if (!hasMediaAccess(c)) {
             return new MediaSnapshot(lc.getString(R.string.media_grant_access),
-                    lc.getString(R.string.media_notification_required), null,
-                    0, 0, 0, 0, false);
+                    lc.getString(R.string.media_notification_required), "", null,
+                    0, 0, 0, 0, false, false);
         }
-        if (hasMediaAccess(c)) {
-            try {
-                MediaSessionManager manager = c.getSystemService(MediaSessionManager.class);
-                for (MediaController controller : manager.getActiveSessions(
-                        new ComponentName(c, MediaAccessService.class))) {
-                    PlaybackState state = controller.getPlaybackState();
-                    if (state == null || state.getState() != PlaybackState.STATE_PLAYING) {
-                        continue;
-                    }
-                    MediaMetadata data = controller.getMetadata();
-                    if (data == null) {
-                        return new MediaSnapshot(lc.getString(R.string.media_playing),
-                                "\u2014", null, 0, state.getPosition(),
-                                state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), true);
-                    }
-                    Bitmap art = data.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
-                    if (art == null) {
-                        art = data.getBitmap(MediaMetadata.METADATA_KEY_ART);
-                    }
-                    if (art == null) {
-                        art = data.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
-                    }
-                    String title = nonempty(data.getString(MediaMetadata.METADATA_KEY_TITLE),
-                            data.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE));
-                    return new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
-                            nonempty(data.getString(MediaMetadata.METADATA_KEY_ARTIST), "\u2014"),
-                            art, data.getLong(MediaMetadata.METADATA_KEY_DURATION),
-                            state.getPosition(), state.getLastPositionUpdateTime(),
-                            state.getPlaybackSpeed(), true);
+        try {
+            MediaSessionManager manager = c.getSystemService(MediaSessionManager.class);
+            MediaController paused = null;
+            PlaybackState pausedState = null;
+            for (MediaController controller : manager.getActiveSessions(
+                    new ComponentName(c, MediaAccessService.class))) {
+                PlaybackState state = controller.getPlaybackState();
+                if (state != null && state.getState() == PlaybackState.STATE_PLAYING) {
+                    return snapshotOf(controller, state, lc);
                 }
-            } catch (RuntimeException ignored) {
-                // Permission or the session may disappear during the snapshot.
+                if (paused == null && state != null
+                        && state.getState() == PlaybackState.STATE_PAUSED
+                        && controller.getMetadata() != null) {
+                    paused = controller;
+                    pausedState = state;
+                }
             }
+            if (paused != null) {
+                return snapshotOf(paused, pausedState, lc);
+            }
+        } catch (RuntimeException ignored) {
+            // Permission or the session may disappear during the snapshot.
         }
-        return new MediaSnapshot(lc.getString(R.string.media_nothing_playing), "", null,
-                0, 0, 0, 0, false);
+        return new MediaSnapshot(lc.getString(R.string.media_nothing_playing), "", "", null,
+                0, 0, 0, 0, false, false);
+    }
+
+    private static MediaSnapshot snapshotOf(MediaController controller, PlaybackState state,
+            Context lc) {
+        boolean playing = state.getState() == PlaybackState.STATE_PLAYING;
+        MediaMetadata data = controller.getMetadata();
+        if (data == null) {
+            return new MediaSnapshot(lc.getString(R.string.media_playing), "\u2014", "", null,
+                    0, state.getPosition(), state.getLastPositionUpdateTime(),
+                    state.getPlaybackSpeed(), playing, false);
+        }
+        String title = nonempty(data.getString(MediaMetadata.METADATA_KEY_TITLE),
+                data.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE));
+        String artist = nonempty(data.getString(MediaMetadata.METADATA_KEY_ARTIST), "\u2014");
+        String album = nonempty(data.getString(MediaMetadata.METADATA_KEY_ALBUM), "");
+        long duration = data.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        String artKey = title + "\u0000" + artist + "\u0000" + duration;
+        Bitmap art = artwork(data, controller.getSessionToken(), artKey);
+        return new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
+                artist, album, art, duration, state.getPosition(),
+                state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), playing,
+                title != null && !title.trim().isEmpty());
+    }
+
+    private static synchronized Bitmap artwork(MediaMetadata data, MediaSession.Token session,
+            String trackKey) {
+        if (!trackKey.equals(cachedArtTrack)
+                || !java.util.Objects.equals(session, cachedArtSession)
+                || (cachedArt != null && cachedArt.isRecycled())) {
+            cachedArtTrack = trackKey;
+            cachedArtSession = session;
+            cachedArt = null;
+        }
+        if (cachedArt != null) {
+            return cachedArt;
+        }
+        Bitmap source = data.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (source == null) {
+            source = data.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        }
+        if (source == null) {
+            source = data.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        }
+        if (source == null || source.isRecycled()) {
+            return null;
+        }
+        try {
+            cachedArt = source.getConfig() != Bitmap.Config.ARGB_8888
+                    ? source.copy(Bitmap.Config.ARGB_8888, false) : source;
+        } catch (RuntimeException ignored) {
+            cachedArt = null;
+        }
+        return cachedArt;
     }
 
     public static String[] media(Context c) {

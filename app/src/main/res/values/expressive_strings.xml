@@ -1,0 +1,23 @@
+<resources>
+    <string name="background">Background</string>
+    <string name="no_picture">No picture</string>
+    <string name="choose_picture">Choose</string>
+    <string name="remove_picture">Remove</string>
+    <string name="picture_import_failed">Could not open picture</string>
+    <string name="picture_remove_failed">Could not remove picture</string>
+    <string name="colours">Colours</string>
+    <string-array name="colour_sources">
+        <item>Wallpaper</item>
+        <item>Album art</item>
+        <item>Teal</item>
+        <item>Emerald</item>
+        <item>Navy</item>
+        <item>Maroon</item>
+        <item>Graphite</item>
+    </string-array>
+    <string name="lyrics">Lyrics</string>
+    <string name="board">Board</string>
+    <string name="lyrics_loading">Finding lyrics…</string>
+    <string name="lyrics_unavailable">No lyrics for this song</string>
+    <string name="lyrics_no_track">No lyrics for this song</string>
+</resources>

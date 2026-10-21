@@ -1,0 +1,23 @@
+<resources>
+    <string name="background">Latar belakang</string>
+    <string name="no_picture">Tiada gambar</string>
+    <string name="choose_picture">Pilih</string>
+    <string name="remove_picture">Buang</string>
+    <string name="picture_import_failed">Gambar tidak dapat dibuka</string>
+    <string name="picture_remove_failed">Gambar tidak dapat dibuang</string>
+    <string name="colours">Warna</string>
+    <string-array name="colour_sources">
+        <item>Kertas dinding</item>
+        <item>Seni album</item>
+        <item>Teal</item>
+        <item>Zamrud</item>
+        <item>Biru tua</item>
+        <item>Merah manggis</item>
+        <item>Grafit</item>
+    </string-array>
+    <string name="lyrics">Lirik</string>
+    <string name="board">Papan</string>
+    <string name="lyrics_loading">Mencari lirik…</string>
+    <string name="lyrics_unavailable">Tiada lirik untuk lagu ini</string>
+    <string name="lyrics_no_track">Tiada lirik untuk lagu ini</string>
+</resources>

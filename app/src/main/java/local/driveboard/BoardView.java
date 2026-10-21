@@ -2,10 +2,8 @@ package local.driveboard;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
-import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -29,11 +27,11 @@ import java.util.Date;
 
 /** Shared proportional renderer for the phone preview and car surface. */
 public final class BoardView extends View {
-    private static final int CREAM = 0xFFF4EFE4;
-    private static final int SAGE = 0xFFA9C2BD;
-    private static final int BRASS = 0xFFC8A55A;
-    private static final int SOFT = 0xFFCFDCD8;
-    private static final int DIM = 0xFF9DB3AF;
+    private int CREAM = 0xFFF4EFE4;
+    private int SAGE = 0xFFA9C2BD;
+    private int BRASS = 0xFFC8A55A;
+    private int SOFT = 0xFFCFDCD8;
+    private int DIM = 0xFF9DB3AF;
     private static final String DASH = "\u2014";
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -44,8 +42,8 @@ public final class BoardView extends View {
     private WidgetData.MediaSnapshot media;
     private String time = DASH;
     private String date = DASH;
-    private Bitmap carRender;
-    private long carRenderAt = Long.MIN_VALUE;
+    private Bitmap background;
+    private BoardColours colours;
     private Context words;
     private boolean editing;
     private boolean carNight;
@@ -58,6 +56,10 @@ public final class BoardView extends View {
     private int startW;
     private int startH;
     private Runnable onEdit;
+    private LyricsDocument lyrics;
+    private boolean lyricsVisible;
+    private boolean lyricsLoading;
+    private long lyricsPosition;
 
     public BoardView(Context c) {
         super(c);
@@ -73,6 +75,53 @@ public final class BoardView extends View {
     public void setCarNight(boolean value) {
         carNight = value;
         invalidate();
+    }
+
+    public void setLyricsVisible(boolean value) {
+        lyricsVisible = value;
+        invalidate();
+    }
+
+    public void setLyricsLoading(boolean value) {
+        lyricsLoading = value;
+        if (lyricsVisible) {
+            invalidate();
+        }
+    }
+
+    public void setLyrics(LyricsDocument document) {
+        lyrics = document;
+        if (lyricsVisible) {
+            invalidate();
+        }
+    }
+
+    public void setLyricsPosition(long positionMs) {
+        int before = lyricsLineIndex();
+        lyricsPosition = Math.max(0, positionMs);
+        if (lyricsVisible && before != lyricsLineIndex()) {
+            invalidate();
+        }
+    }
+
+    public int lyricsLineIndex() {
+        return lyrics == null ? -1 : lyrics.lineIndexAt(lyricsPosition);
+    }
+
+    public int surfaceColor() {
+        return colours == null ? BoardColours.current(getContext()).surface : colours.surface;
+    }
+
+    public boolean hitNowPlaying(float x, float y) {
+        if (lyricsVisible) {
+            return true;
+        }
+        for (BoardLayout.Card card : layout.cards) {
+            if ("media".equals(card.type) && bounds(card).contains(x, y)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void setMode(String value) {
@@ -95,18 +144,8 @@ public final class BoardView extends View {
         prayer = WidgetData.prayerSnapshot(words);
         battery = WidgetData.battery(words);
         media = WidgetData.mediaSnapshot(words);
-        long renderAt = Store.prefs(getContext()).getLong("car_render_at", 0);
-        if (renderAt != carRenderAt) {
-            carRenderAt = renderAt;
-            if (carRender != null) {
-                carRender.recycle();
-                carRender = null;
-            }
-            if (renderAt > 0) {
-                carRender = BitmapFactory.decodeFile(
-                        CarPictureStore.renderFile(getContext()).getAbsolutePath());
-            }
-        }
+        background = BackgroundStore.load(getContext());
+        colours = BoardColours.current(getContext(), media == null ? null : media.art);
         invalidate();
     }
 
@@ -122,21 +161,39 @@ public final class BoardView extends View {
         float e = edge();
         float cw = (getWidth() - 2 * e) / 12f;
         float ch = (getHeight() - 2 * e) / 6f;
-        return new RectF(e + c.col * cw, e + c.row * ch,
-                e + (c.col + c.w) * cw, e + (c.row + c.h) * ch);
+        float gap = getWidth() * .015f;
+        return new RectF(e + c.col * cw + gap / 2f,
+                e + c.row * ch + gap / 2f,
+                e + (c.col + c.w) * cw - gap / 2f,
+                e + (c.row + c.h) * ch - gap / 2f);
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        Tone tone = Tone.current(getContext());
-        paint.setColor(0xFFFFFFFF);
+        if (colours == null) {
+            colours = BoardColours.current(getContext(), media == null ? null : media.art);
+        }
+        CREAM = colours.onSurface;
+        SAGE = colours.onSurfaceVariant;
+        BRASS = colours.primary;
+        SOFT = colours.onSurface;
+        DIM = colours.onSurfaceVariant;
+        paint.setColor(colours.surface);
         paint.setStyle(Paint.Style.FILL);
         paint.setFilterBitmap(true);
-        paint.setShader(new LinearGradient(0, 0, 0, getHeight(),
-                lighten(tone.ground, .04f), tone.ground, Shader.TileMode.CLAMP));
         canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-        paint.setShader(null);
+        if (!lyricsVisible && background != null && !background.isRecycled()) {
+            drawCenterCrop(canvas, background, new RectF(0, 0, getWidth(), getHeight()));
+            paint.setColor(colours.surface);
+            paint.setAlpha(carNight ? 204 : 184);
+            canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
+            paint.setAlpha(255);
+        }
+        if (lyricsVisible) {
+            drawLyrics(canvas);
+            return;
+        }
         if (editing) {
             drawGrid(canvas);
         }
@@ -146,9 +203,13 @@ public final class BoardView extends View {
                 continue;
             }
             canvas.save();
-            canvas.clipRect(r);
+            drawCardSurface(canvas, c.type, r);
+            canvas.clipPath(cardPath(c.type, r));
             float pad = Math.max(4.5f * unit(),
                     Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
+            if ("media".equals(c.type)) {
+                pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
+            }
             RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
             if ("clock".equals(c.type)) {
                 drawClock(canvas, content);
@@ -164,16 +225,218 @@ public final class BoardView extends View {
             }
             canvas.restore();
         }
-        drawDividers(canvas);
     }
 
-    private static int lighten(int color, float amount) {
-        int r = (color >> 16) & 255;
-        int g = (color >> 8) & 255;
-        int b = color & 255;
-        return 0xFF000000 | ((r + Math.round((255 - r) * amount)) << 16)
-                | ((g + Math.round((255 - g) * amount)) << 8)
-                | (b + Math.round((255 - b) * amount));
+    private void drawCenterCrop(Canvas canvas, Bitmap bitmap, RectF destination) {
+        float scale = Math.max(destination.width() / bitmap.getWidth(),
+                destination.height() / bitmap.getHeight());
+        float sourceWidth = destination.width() / scale;
+        float sourceHeight = destination.height() / scale;
+        RectF source = new RectF((bitmap.getWidth() - sourceWidth) / 2f,
+                (bitmap.getHeight() - sourceHeight) / 2f,
+                (bitmap.getWidth() + sourceWidth) / 2f,
+                (bitmap.getHeight() + sourceHeight) / 2f);
+        paint.setColor(0xFFFFFFFF);
+        paint.setAlpha(255);
+        canvas.drawBitmap(bitmap, new android.graphics.Rect(
+                Math.round(source.left), Math.round(source.top),
+                Math.round(source.right), Math.round(source.bottom)), destination, paint);
+    }
+
+    private Path cardPath(String type, RectF bounds) {
+        Path path = new Path();
+        float radius = Math.min(bounds.width(), bounds.height());
+        if ("battery".equals(type)) {
+            float aspect = bounds.width() / bounds.height();
+            if (aspect > .75f && aspect < 1.4f) {
+                float half = radius / 2f;
+                path.addOval(new RectF(bounds.centerX() - half,
+                        bounds.centerY() - half, bounds.centerX() + half,
+                        bounds.centerY() + half), Path.Direction.CW);
+            } else {
+                path.addRoundRect(bounds, radius * .46f, radius * .46f,
+                        Path.Direction.CW);
+            }
+        } else if ("prayer".equals(type)) {
+            path.addRoundRect(bounds, radius * .5f, radius * .5f, Path.Direction.CW);
+        } else if ("media".equals(type)) {
+            path.addRoundRect(bounds, radius * .22f, radius * .22f, Path.Direction.CW);
+        } else {
+            path.addRoundRect(bounds, radius * .28f, radius * .28f, Path.Direction.CW);
+        }
+        return path;
+    }
+
+    private void drawCardSurface(Canvas canvas, String type, RectF bounds) {
+        int color = "clock".equals(type) ? colours.surfaceContainerHigh
+                : "prayer".equals(type) ? colours.primaryContainer
+                : "media".equals(type) ? colours.secondaryContainer
+                : colours.tertiaryContainer;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(color);
+        paint.setAlpha(255);
+        canvas.drawPath(cardPath(type, bounds), paint);
+    }
+
+    private void drawLyrics(Canvas canvas) {
+        float inset = Math.max(12f * unit(), getWidth() * .035f);
+        RectF content = new RectF(inset, inset,
+                getWidth() - inset, getHeight() - inset);
+        canvas.save();
+        canvas.clipRect(content);
+        float artSize = Math.min(content.height() * .50f, content.width() * .31f);
+        RectF artBounds = new RectF(content.left, content.top,
+                content.left + artSize, content.top + artSize);
+        drawLyricsArt(canvas, artBounds);
+        float leftWidth = artSize;
+        float titleSize = Math.min(20f * unit(), content.height() * .15f);
+        float titleY = artBounds.bottom + 8f * unit() + titleSize;
+        if (media != null) {
+            text(canvas, media.title, content.left, titleY, titleSize,
+                    CREAM, Fonts.semibold(getContext()), leftWidth);
+            text(canvas, media.artist, content.left,
+                    titleY + titleSize * 1.2f, titleSize * .72f,
+                    SAGE, Fonts.regular(getContext()), leftWidth);
+        }
+        float lyricLeft = artBounds.right + Math.max(16f * unit(), content.width() * .05f);
+        RectF lyricArea = new RectF(lyricLeft, content.top,
+                content.right, content.bottom);
+        if (lyricsLoading || lyrics == null || lyrics.isEmpty()) {
+            int message = lyricsLoading ? R.string.lyrics_loading
+                    : media == null || !media.hasTrack ? R.string.lyrics_no_track
+                    : R.string.lyrics_unavailable;
+            stateText(canvas, words.getString(message), lyricArea,
+                    Math.min(24f * unit(), lyricArea.height() * .24f), CREAM);
+            canvas.restore();
+            return;
+        }
+        if (lyrics.isTimed()) {
+            int current = lyricsLineIndex();
+            if (current < 0) {
+                current = 0;
+            }
+            int[] indexes = {current - 1, current, current + 1, current + 2};
+            int[] colors = {withAlpha(SAGE, .5f),
+                    lyricsLineIndex() >= 0 ? BRASS : SAGE,
+                    withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)};
+            float mainSize = Math.min(25f * unit(), lyricArea.height() * .22f);
+            float sideSize = Math.min(16f * unit(), lyricArea.height() * .14f);
+            float gap = Math.max(2f * unit(), lyricArea.height() * .045f);
+            StaticLayout[] lines = lyricLayouts(indexes, colors,
+                    lyricArea.width(), mainSize, sideSize,
+                    lyricsLineIndex() >= 0);
+            float total = lyricBlockHeight(lines, gap);
+            if (total > lyricArea.height() * .95f) {
+                float scale = lyricArea.height() * .95f / total;
+                gap *= scale;
+                lines = lyricLayouts(indexes, colors, lyricArea.width(),
+                        mainSize * scale, sideSize * scale,
+                        lyricsLineIndex() >= 0);
+                total = lyricBlockHeight(lines, gap);
+            }
+            float y = lyricArea.centerY() - total / 2f;
+            canvas.save();
+            canvas.clipRect(lyricArea);
+            for (StaticLayout line : lines) {
+                if (line == null) {
+                    continue;
+                }
+                canvas.save();
+                canvas.translate(lyricArea.left, y);
+                line.draw(canvas);
+                canvas.restore();
+                y += line.getHeight() + gap;
+            }
+            canvas.restore();
+        } else {
+            TextPaint lyricPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            lyricPaint.setColor(CREAM);
+            lyricPaint.setTypeface(Fonts.regular(getContext()));
+            Fonts.cardText(lyricPaint);
+            lyricPaint.setTextSize(Math.min(17f * unit(), lyricArea.height() * .14f));
+            StaticLayout lines = StaticLayout.Builder.obtain(lyrics.plainText, 0,
+                            lyrics.plainText.length(), lyricPaint,
+                            Math.max(1, (int) lyricArea.width()))
+                    .setIncludePad(false)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .build();
+            canvas.translate(lyricArea.left, lyricArea.top);
+            lines.draw(canvas);
+        }
+        canvas.restore();
+    }
+
+    private void drawLyricsArt(Canvas canvas, RectF bounds) {
+        Path shape = ExpressiveShapes.cookie(bounds);
+        paint.setColor(colours.surfaceContainerHighest);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawPath(shape, paint);
+        if (media == null || media.art == null || media.art.isRecycled()) {
+            text(canvas, "♫", bounds.left + bounds.width() * .34f,
+                    bounds.centerY() + bounds.height() * .15f,
+                    bounds.height() * .43f, SAGE,
+                    Fonts.semibold(getContext()), bounds.width() * .5f);
+            return;
+        }
+        Bitmap art = media.art;
+        BitmapShader shader = new BitmapShader(art,
+                Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        float scale = Math.max(bounds.width() / art.getWidth(),
+                bounds.height() / art.getHeight());
+        Matrix matrix = new Matrix();
+        matrix.setScale(scale, scale);
+        matrix.postTranslate(bounds.centerX() - art.getWidth() * scale / 2f,
+                bounds.centerY() - art.getHeight() * scale / 2f);
+        shader.setLocalMatrix(matrix);
+        paint.setColor(0xFFFFFFFF);
+        paint.setShader(shader);
+        canvas.drawPath(shape, paint);
+        paint.setShader(null);
+    }
+
+    private StaticLayout[] lyricLayouts(int[] indexes, int[] colors,
+            float width, float mainSize, float sideSize, boolean hasCurrent) {
+        StaticLayout[] layouts = new StaticLayout[indexes.length];
+        for (int i = 0; i < indexes.length; i++) {
+            int index = indexes[i];
+            if (index < 0 || index >= lyrics.lines.length) {
+                continue;
+            }
+            String line = lyrics.lines[index].text;
+            if (line == null || line.isEmpty()) {
+                continue;
+            }
+            boolean current = i == 1 && hasCurrent;
+            TextPaint lyricPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            lyricPaint.setColor(colors[i]);
+            lyricPaint.setTypeface(current ? Fonts.semibold(getContext())
+                    : Fonts.regular(getContext()));
+            Fonts.cardText(lyricPaint);
+            lyricPaint.setTextSize(i == 1 ? mainSize : sideSize);
+            layouts[i] = StaticLayout.Builder.obtain(line, 0, line.length(),
+                            lyricPaint, Math.max(1, (int) width))
+                    .setIncludePad(false)
+                    .setMaxLines(current ? 3 : 1)
+                    .setEllipsize(TextUtils.TruncateAt.END)
+                    .build();
+        }
+        return layouts;
+    }
+
+    private static float lyricBlockHeight(StaticLayout[] lines, float gap) {
+        float height = 0f;
+        int count = 0;
+        for (StaticLayout line : lines) {
+            if (line != null) {
+                height += line.getHeight();
+                count++;
+            }
+        }
+        return height + Math.max(0, count - 1) * gap;
+    }
+
+    private static int withAlpha(int color, float alpha) {
+        return (Math.round(255f * alpha) << 24) | (color & 0x00FFFFFF);
     }
 
     private void drawDividers(Canvas canvas) {
@@ -223,7 +486,7 @@ public final class BoardView extends View {
     }
 
     private void drawClock(Canvas canvas, RectF r) {
-        Typeface clockFace = Fonts.regular(getContext());
+        Typeface clockFace = Fonts.medium(getContext());
         float size = fit(time, r.height() * .60f, r.width(), clockFace);
         float dateSize = Math.min(18f * unit(), r.height() * .16f);
         paint.setTypeface(clockFace);
@@ -263,7 +526,7 @@ public final class BoardView extends View {
         float x = r.left;
         if (next != null && r.width() >= star * 3.2f && r.height() >= star * 1.5f) {
             drawStar(canvas, x + star / 2,
-                    r.top + (limit - r.top) / 2f, star, imminent);
+                    r.top + (limit - r.top) / 2f, star, true);
             x += star + Math.max(5f * unit(), star * .25f);
         }
         float width = r.right - x;
@@ -295,13 +558,15 @@ public final class BoardView extends View {
         float titleY = r.top + (available - blockHeight) / 2f + titleSize;
         titleSize = fit(title + "  " + next.time, titleSize, width,
                 Fonts.semibold(getContext()));
-        text(canvas, title, x, titleY, titleSize, stale ? DIM : CREAM,
+        text(canvas, title, x, titleY, titleSize,
+                stale ? DIM : colours.onPrimaryContainer,
                 Fonts.semibold(getContext()), width);
         paint.setTypeface(Fonts.semibold(getContext()));
         paint.setTextSize(titleSize);
         float timeX = x + paint.measureText(title + "  ");
-        text(canvas, next.time, timeX, titleY, titleSize, stale ? DIM : CREAM,
-                Fonts.regular(getContext()), r.right - timeX);
+        text(canvas, next.time, timeX, titleY, titleSize,
+                stale ? DIM : colours.onPrimaryContainer,
+                Fonts.semibold(getContext()), r.right - timeX);
         String countdown = prayer == null ? DASH : prayer.countdown;
         if (prayer != null) {
             if ("stale".equals(prayer.status)) {
@@ -324,8 +589,8 @@ public final class BoardView extends View {
                 : countdown;
         float countdownY = Math.min(limit, titleY + countSize * 1.12f);
         text(canvas, displayCountdown, x, countdownY, countSize,
-                stale ? DIM : BRASS,
-                Fonts.regular(getContext()), width);
+                stale ? DIM : withAlpha(colours.onPrimaryContainer, .8f),
+                Fonts.medium(getContext()), width);
         if (prayer != null && prayer.zoneCode != null && !prayer.zoneCode.isEmpty()) {
             paint.setTypeface(Fonts.regular(getContext()));
             paint.setTextSize(countSize);
@@ -359,7 +624,7 @@ public final class BoardView extends View {
                         (r.bottom - top) * .03f, paint);
             }
             centeredText(canvas, row.name, center, top + (r.bottom - top) * .58f,
-                    nameSize, color, Fonts.regular(getContext()), col - 2f * unit());
+                    nameSize, color, Fonts.medium(getContext()), col - 2f * unit());
             centeredText(canvas, row.time, center, top + (r.bottom - top) * .91f,
                     timeSize, color, Fonts.regular(getContext()), col - 2f * unit());
         }
@@ -369,12 +634,9 @@ public final class BoardView extends View {
         paint.setColor(BRASS);
         paint.setStyle(filled ? Paint.Style.FILL : Paint.Style.STROKE);
         paint.setStrokeWidth(Math.max(1f, 1.6f * unit()));
-        float half = size * .34f;
-        canvas.drawRect(x - half, y - half, x + half, y + half, paint);
-        canvas.save();
-        canvas.rotate(45f, x, y);
-        canvas.drawRect(x - half, y - half, x + half, y + half, paint);
-        canvas.restore();
+        float half = size * .5f;
+        canvas.drawPath(ExpressiveShapes.star(new RectF(
+                x - half, y - half, x + half, y + half)), paint);
         paint.setStyle(Paint.Style.FILL);
     }
 
@@ -391,16 +653,16 @@ public final class BoardView extends View {
         }
     }
     private void drawMedia(Canvas canvas, RectF r) {
-        float artworkSize = Math.min(r.height() * .90f, r.width() * .32f);
+        float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
         float artworkTop = r.centerY() - artworkSize / 2f;
         RectF artwork = new RectF(r.left, artworkTop,
                 r.left + artworkSize, artworkTop + artworkSize);
-        float radius = artworkSize * .12f;
+        Path artShape = ExpressiveShapes.cookie(artwork);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFF000000);
         paint.setShadowLayer(artworkSize * .06f, 0,
                 artworkSize * .02f, 0x59000000);
-        canvas.drawRoundRect(artwork, radius, radius, paint);
+        canvas.drawPath(artShape, paint);
         paint.clearShadowLayer();
         if (media != null && media.art != null && !media.art.isRecycled()) {
             Bitmap art = media.art;
@@ -415,11 +677,11 @@ public final class BoardView extends View {
             shader.setLocalMatrix(matrix);
             paint.setColor(0xFFFFFFFF);
             paint.setShader(shader);
-            canvas.drawRoundRect(artwork, radius, radius, paint);
+            canvas.drawPath(artShape, paint);
             paint.setShader(null);
         } else {
-            paint.setColor(Tone.current(getContext()).panel);
-            canvas.drawRoundRect(artwork, radius, radius, paint);
+            paint.setColor(colours.surfaceContainerHighest);
+            canvas.drawPath(artShape, paint);
             float cx = artwork.centerX();
             float cy = artwork.centerY();
             paint.setColor(SAGE);
@@ -450,21 +712,8 @@ public final class BoardView extends View {
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setTypeface(Fonts.semibold(getContext()));
         titlePaint.setTextSize(titleSize);
-        titlePaint.setFontFeatureSettings("tnum");
-        titlePaint.setColor(playing ? (carNight ? 0xFFD0CBC2 : CREAM) : SAGE);
-        float minimumTitleSize = Math.min(titleSize, 4f * unit());
-        for (int attempt = 0; attempt < 16 && titleSize > minimumTitleSize; attempt++) {
-            StaticLayout fullTitle = StaticLayout.Builder.obtain(title, 0,
-                            title.length(), titlePaint, Math.max(1, (int) width))
-                    .setIncludePad(false)
-                    .build();
-            if (fullTitle.getLineCount() <= 2
-                    && fullTitle.getHeight() <= r.height() * .50f) {
-                break;
-            }
-            titleSize = Math.max(minimumTitleSize, titleSize * .88f);
-            titlePaint.setTextSize(titleSize);
-        }
+        Fonts.cardText(titlePaint);
+        titlePaint.setColor(playing ? CREAM : SAGE);
         StaticLayout titleLayout = stateLayout(title, titlePaint, width);
         canvas.save();
         canvas.translate(x, textTop);
@@ -484,13 +733,29 @@ public final class BoardView extends View {
             }
             float progress = Math.max(0f, Math.min(1f,
                     (float) position / media.duration));
-            float lineY = r.bottom - 2f * unit();
-            paint.setStrokeWidth(2f);
+            float lineY = r.bottom - 3f * unit();
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1.5f, r.height() * .015f));
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setColor((CREAM & 0x00FFFFFF) | 0x40000000);
-            canvas.drawLine(x, lineY, r.right, lineY, paint);
-            paint.setColor((CREAM & 0x00FFFFFF) | 0xD9000000);
-            canvas.drawLine(x, lineY, x + width * progress, lineY, paint);
+            float end = x + width * progress;
+            float gap = Math.max(3f * unit(), r.width() * .025f);
+            paint.setColor((BRASS & 0x00FFFFFF) | 0x4D000000);
+            float unplayedStart = progress <= 0f ? x : end + gap;
+            if (unplayedStart < r.right) {
+                canvas.drawLine(unplayedStart, lineY, r.right, lineY, paint);
+            }
+            paint.setColor(BRASS);
+            Path wave = new Path();
+            wave.moveTo(x, lineY);
+            float step = Math.max(1f, r.width() * .01f);
+            for (float point = x + step; point < end; point += step) {
+                float phase = (point - x) / Math.max(1f, r.width() * .1f);
+                wave.lineTo(point, lineY + (float) Math.sin(phase * Math.PI * 2)
+                        * r.height() * .03f);
+            }
+            wave.lineTo(end, lineY);
+            canvas.drawPath(wave, paint);
+            paint.setStyle(Paint.Style.FILL);
         }
     }
 
@@ -511,37 +776,6 @@ public final class BoardView extends View {
         float rangeTop = Math.min(r.bottom, y + secondary * .25f);
         RectF rangeBounds = new RectF(r.left, rangeTop, r.right,
                 stale ? Math.max(rangeTop, r.bottom - secondary * .8f) : r.bottom);
-        boolean showRender = carRender != null && r.height() > 60f * unit();
-        if (showRender) {
-            RectF imageBounds = new RectF(r.left, r.top, r.right,
-                    r.top + r.height() * .53f);
-            float scale = Math.min(imageBounds.width() / carRender.getWidth(),
-                    imageBounds.height() / carRender.getHeight());
-            float imageWidth = carRender.getWidth() * scale;
-            float imageHeight = carRender.getHeight() * scale;
-            float centerX = imageBounds.centerX();
-            float centerY = imageBounds.centerY();
-            RectF destination = new RectF(centerX - imageWidth / 2f,
-                    centerY - imageHeight / 2f, centerX + imageWidth / 2f,
-                    centerY + imageHeight / 2f);
-            paint.setAlpha(255);
-            canvas.drawBitmap(carRender, null, destination, paint);
-            float valueSize = Math.min(size, r.height() * .24f);
-            float valueY = r.top + r.height() * .79f;
-            drawBatteryValue(canvas, percent, r.left, valueY,
-                    valueSize, r.width(), valid, stale);
-            stateText(canvas, range, new RectF(r.left,
-                    r.top + r.height() * .80f, r.right,
-                    stale ? r.bottom - secondary * .8f : r.bottom), secondary, SAGE);
-            if (stale && battery.updated != null && !battery.updated.isEmpty()) {
-                String updated = words.getString(R.string.board_updated, battery.updated);
-                text(canvas, updated, r.left, r.bottom,
-                        fit(updated, Math.min(10f * unit(), secondary * .75f), r.width(),
-                                Fonts.regular(getContext())), DIM,
-                        Fonts.regular(getContext()), r.width());
-            }
-            return;
-        }
         drawBatteryValue(canvas, percent, r.left, y, size, r.width(), valid, stale);
         stateText(canvas, range, rangeBounds, secondary, SAGE);
         if (stale && battery.updated != null && !battery.updated.isEmpty()) {
@@ -593,9 +827,9 @@ public final class BoardView extends View {
         }
         String message = value == null || value.isEmpty() ? DASH : value;
         TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        textPaint.setColor(carNight && color == CREAM ? 0xFFD0CBC2 : color);
+        textPaint.setColor(color);
         textPaint.setTypeface(Fonts.regular(getContext()));
-        textPaint.setFontFeatureSettings("tnum");
+        Fonts.cardText(textPaint);
         textPaint.setTextSize(size);
         StaticLayout lines = stateLayout(message, textPaint, bounds.width());
         // Keep title-small sizing unless the actual wrapped lines exceed the card.
@@ -623,7 +857,11 @@ public final class BoardView extends View {
 
     private float fit(String value, float size, float width, Typeface face) {
         paint.setTypeface(face);
-        paint.setFontFeatureSettings("tnum");
+        if (value != null && value.equals(time)) {
+            Fonts.displayText(paint);
+        } else {
+            Fonts.cardText(paint);
+        }
         paint.setTextSize(Math.max(1f, size));
         float measured = paint.measureText(value == null ? DASH : value);
         return Math.max(1f, measured > width && measured > 0
@@ -637,9 +875,13 @@ public final class BoardView extends View {
         }
         String s = value == null || value.isEmpty() ? DASH : value;
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(carNight && color == CREAM ? 0xFFD0CBC2 : color);
+        paint.setColor(color);
         paint.setTypeface(face);
-        paint.setFontFeatureSettings("tnum");
+        if (s.equals(time)) {
+            Fonts.displayText(paint);
+        } else {
+            Fonts.cardText(paint);
+        }
         paint.setTextSize(size);
         if (paint.measureText(s) > width) {
             String ellipsis = "\u2026";

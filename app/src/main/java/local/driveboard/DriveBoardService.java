@@ -9,6 +9,12 @@ import android.content.res.Configuration;
 
 /** Entry point for the car host. */
 public final class DriveBoardService extends CarAppService {
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        BackgroundStore.cleanupLegacy(this);
+    }
+
     @NonNull
     @Override
     public HostValidator createHostValidator() {
