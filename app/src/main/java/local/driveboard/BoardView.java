@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -40,6 +41,7 @@ public final class BoardView extends View {
     private String time = DASH;
     private String date = DASH;
     private Bitmap background;
+    private Bitmap glassBackdrop;
     private BoardColours colours;
     private Context words;
     private boolean editing;
@@ -204,6 +206,13 @@ public final class BoardView extends View {
         invalidate();
     }
 
+    void onGlassBackdropReady() {
+        invalidateStatic();
+        if (frameRequestHook != null) {
+            frameRequestHook.run();
+        }
+    }
+
     private void clearLyricBlocks() {
         currentLyricBlock = null;
         outgoingLyricBlock = null;
@@ -338,10 +347,14 @@ public final class BoardView extends View {
             staticDirty = true;
         }
         if (staticDirty || now - staticDrawnAt >= 1000) {
+            long staticStarted = SystemClock.uptimeMillis();
             staticLayer.eraseColor(0);
             drawStatic(new Canvas(staticLayer));
             staticDrawnAt = now;
             staticDirty = false;
+            CarDiagnostics.log(getContext(), "Board static build "
+                    + (SystemClock.uptimeMillis() - staticStarted) + "ms "
+                    + width + "x" + height);
         }
         paint.setColor(0xFFFFFFFF);
         paint.setAlpha(255);
@@ -385,7 +398,8 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setFilterBitmap(true);
         canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-        if (!lyricsVisible && background != null && !background.isRecycled()) {
+        glassBackdrop = GlassBackdrop.get(background, getWidth(), getHeight(), this);
+        if (background != null && !background.isRecycled()) {
             drawCenterCrop(canvas, background, new RectF(0, 0, getWidth(), getHeight()));
             paint.setColor(colours.surface);
             paint.setAlpha(carNight ? 204 : 184);
@@ -485,18 +499,62 @@ public final class BoardView extends View {
                 : "prayer".equals(type) ? colours.primaryContainer
                 : "media".equals(type) ? colours.secondaryContainer
                 : colours.tertiaryContainer;
+        drawGlassSurface(canvas, cardPath(type, bounds), bounds, color);
+    }
+
+    private void drawGlassSurface(Canvas canvas, Path shape, RectF bounds, int tint) {
+        float height = bounds.height();
+        paint.setShader(null);
         paint.setStyle(Paint.Style.FILL);
-        if (background != null && !background.isRecycled()) {
-            color = colours.translucentContainer(color);
+        paint.setColor(0x01000000);
+        paint.setShadowLayer(Math.max(1f, height * .04f), 0, height * .015f, 0x40000000);
+        canvas.drawPath(shape, paint);
+        paint.clearShadowLayer();
+
+        canvas.save();
+        canvas.clipPath(shape);
+        if (glassBackdrop != null && !glassBackdrop.isRecycled()) {
+            paint.setColor(0xFFFFFFFF);
+            paint.setAlpha(255);
+            paint.setFilterBitmap(true);
+            canvas.drawBitmap(glassBackdrop, null,
+                    new RectF(0, 0, getWidth(), getHeight()), paint);
         }
-        paint.setColor(color);
-        canvas.drawPath(cardPath(type, bounds), paint);
+        paint.setColor(background == null ? (179 << 24) | (tint & 0x00FFFFFF)
+                : colours.translucentContainer(tint));
+        canvas.drawPath(shape, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2f * getResources().getDisplayMetrics().density);
+        paint.setColor(0xFFFFFFFF);
+        paint.setShader(new LinearGradient(bounds.left, bounds.top,
+                bounds.right, bounds.bottom,
+                0x38FFFFFF, 0x0FFFFFFF, Shader.TileMode.CLAMP));
+        canvas.drawPath(shape, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.restore();
     }
 
     private void drawLyrics(Canvas canvas, boolean staticPass) {
         float inset = Math.max(12f * unit(), getWidth() * .035f);
         RectF content = new RectF(inset, inset,
                 getWidth() - inset, getHeight() - inset);
+        if (staticPass) {
+            float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
+            RectF leftPanel = new RectF(content.left - 6f * unit(),
+                    content.top - 6f * unit(), content.left + leftWidth + 6f * unit(),
+                    content.bottom + 6f * unit());
+            RectF rightPanel = new RectF(leftPanel.right + 6f * unit(),
+                    content.top - 6f * unit(), content.right + 6f * unit(),
+                    content.bottom + 6f * unit());
+            Path leftShape = new Path();
+            Path rightShape = new Path();
+            float radius = Math.min(18f * unit(), content.height() * .12f);
+            leftShape.addRoundRect(leftPanel, radius, radius, Path.Direction.CW);
+            rightShape.addRoundRect(rightPanel, radius, radius, Path.Direction.CW);
+            drawGlassSurface(canvas, leftShape, leftPanel, colours.surfaceContainerHigh);
+            drawGlassSurface(canvas, rightShape, rightPanel, colours.surfaceContainerHigh);
+        }
         canvas.save();
         canvas.clipRect(content);
         float artSize = Math.min(content.height() * .50f, content.width() * .31f);

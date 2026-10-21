@@ -30,8 +30,10 @@ public final class BoardColours {
     public final int onPrimary;
     public final int onPrimaryContainer;
     public final int outlineVariant;
-    /** Opacity for containers drawn over a user picture. */
+    /** Highest role opacity, kept for callers that need a single conservative value. */
     public final int containerAlpha;
+    private final int[] containerColours;
+    private final int[] containerAlphas;
 
     private BoardColours(int seed) {
         this.seed = seed | 0xFF000000;
@@ -47,12 +49,19 @@ public final class BoardColours {
         onPrimary = scheme.getOnPrimary();
         onPrimaryContainer = scheme.getOnPrimaryContainer();
         outlineVariant = scheme.getOutlineVariant();
-        int[] containers = {surface, surfaceContainerLow, surfaceContainerHigh,
+        containerColours = new int[]{surface, surfaceContainerLow, surfaceContainerHigh,
                 surfaceContainerHighest, primaryContainer,
                 secondaryContainer, tertiaryContainer};
-        onSurface = accessible(scheme.getOnSurface(), scheme, containers);
-        onSurfaceVariant = accessible(scheme.getOnSurfaceVariant(), scheme, containers);
-        containerAlpha = readableContainerAlpha(containers, onSurface, onSurfaceVariant);
+        onSurface = accessible(scheme.getOnSurface(), scheme, containerColours);
+        onSurfaceVariant = accessible(scheme.getOnSurfaceVariant(), scheme, containerColours);
+        containerAlphas = new int[containerColours.length];
+        int highest = 0;
+        for (int i = 0; i < containerColours.length; i++) {
+            containerAlphas[i] = readableContainerAlpha(containerColours[i],
+                    onSurface, onSurfaceVariant);
+            highest = Math.max(highest, containerAlphas[i]);
+        }
+        containerAlpha = highest;
     }
 
     public static synchronized BoardColours fromSeed(int seed) {
@@ -145,23 +154,26 @@ public final class BoardColours {
     }
 
     public int translucentContainer(int opaqueContainer) {
-        return (containerAlpha << 24) | (opaqueContainer & 0x00FFFFFF);
+        return (alphaForContainer(opaqueContainer) << 24)
+                | (opaqueContainer & 0x00FFFFFF);
     }
 
-    private static int readableContainerAlpha(int[] containers, int text, int secondaryText) {
-        for (int alpha = 209; alpha <= 255; alpha++) {
-            boolean readable = true;
-            for (int container : containers) {
-                int overWhite = composite(container, 0xFFFFFFFF, alpha);
-                int overBlack = composite(container, 0xFF000000, alpha);
-                if (contrast(text, overWhite) < 4.5 || contrast(text, overBlack) < 4.5
-                        || contrast(secondaryText, overWhite) < 4.5
-                        || contrast(secondaryText, overBlack) < 4.5) {
-                    readable = false;
-                    break;
-                }
+    public int alphaForContainer(int opaqueContainer) {
+        for (int i = 0; i < containerColours.length; i++) {
+            if (containerColours[i] == opaqueContainer) {
+                return containerAlphas[i];
             }
-            if (readable) {
+        }
+        return containerAlpha;
+    }
+
+    private static int readableContainerAlpha(int container, int text, int secondaryText) {
+        for (int alpha = 0; alpha <= 255; alpha++) {
+            int overWhite = composite(container, 0xFFFFFFFF, alpha);
+            int overBlack = composite(container, 0xFF000000, alpha);
+            if (contrast(text, overWhite) >= 4.5 && contrast(text, overBlack) >= 4.5
+                    && contrast(secondaryText, overWhite) >= 4.5
+                    && contrast(secondaryText, overBlack) >= 4.5) {
                 return alpha;
             }
         }
