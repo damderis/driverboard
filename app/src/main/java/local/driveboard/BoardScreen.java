@@ -81,6 +81,7 @@ public final class BoardScreen extends Screen {
 
     private SurfaceCallback surfaceCallback;
     private int consecutiveFailures;
+    private long firstFailureAt;
     private long lastRecovery = -5000;
     private String lastEnergyLog = "";
     private long lastEnergyLogAt;
@@ -120,11 +121,22 @@ public final class BoardScreen extends Screen {
 
     private void drawFailed(RuntimeException error) {
         consecutiveFailures++;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (consecutiveFailures == 1) {
+            firstFailureAt = now;
+        }
         if (consecutiveFailures == 1 || consecutiveFailures % 10 == 0) {
             CarDiagnostics.log(getCarContext(), "Draw failure " + error.getClass().getName()
                     + ": " + error.getMessage() + " consecutive=" + consecutiveFailures);
         }
-        long now = android.os.SystemClock.elapsedRealtime();
+        // A host buffer queue still held by a dead process never recovers; closing the app
+        // makes Android Auto build a fresh surface on the next launch instead of a frozen frame.
+        if (now - firstFailureAt >= 15000) {
+            CarDiagnostics.log(getCarContext(), "Surface unusable for 15 s; finishing car app");
+            consecutiveFailures = 0;
+            handler.post(() -> getCarContext().finishCarApp());
+            return;
+        }
         if (consecutiveFailures >= 3 && now - lastRecovery >= 5000) {
             lastRecovery = now;
             handler.post(() -> {
@@ -403,10 +415,11 @@ public final class BoardScreen extends Screen {
             return;
         }
         Rect bounds = new Rect(0, 0, width, height);
-        // Some hosts do not send a visible callback. Use stable, then full surface.
-        Rect drawArea = new Rect(visibleArea);
+        // Lay out in the stable area: the visible area shrinks and grows as the host shows and
+        // hides the action strip, which made every widget jump. Fall back to visible, then full.
+        Rect drawArea = new Rect(stableArea);
         if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
-            drawArea.set(stableArea);
+            drawArea.set(visibleArea);
         }
         if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
             drawArea.set(bounds);
@@ -446,6 +459,7 @@ public final class BoardScreen extends Screen {
         }
         int measuredWidth = View.MeasureSpec.makeMeasureSpec(drawArea.width(), View.MeasureSpec.EXACTLY);
         int measuredHeight = View.MeasureSpec.makeMeasureSpec(drawArea.height(), View.MeasureSpec.EXACTLY);
+        board.setFrame(width, height, drawArea.left, drawArea.top);
         board.measure(measuredWidth, measuredHeight);
         board.layout(0, 0, drawArea.width(), drawArea.height());
 
@@ -460,7 +474,7 @@ public final class BoardScreen extends Screen {
             // Software canvas, as in the androidx car samples: a hardware renderer aborts the
             // process natively when the host swaps the surface mid-frame.
             canvas = drawingSurface.lockCanvas(null);
-            canvas.drawColor(board.surfaceColor());
+            board.drawFrameBackground(canvas, new android.graphics.RectF(0, 0, width, height));
             int save = canvas.save();
             canvas.clipRect(drawArea);
             canvas.translate(drawArea.left, drawArea.top);

@@ -44,6 +44,11 @@ public final class BoardView extends View {
     private String date = DASH;
     private Bitmap background;
     private Bitmap glassBackdrop;
+    private int frameW;
+    private int frameH;
+    private float frameX;
+    private float frameY;
+    private boolean externalBackground;
     private final Map<String, Integer> glassAlphas = new HashMap<>();
     private BoardColours colours;
     private Context words;
@@ -398,17 +403,9 @@ public final class BoardView extends View {
         BRASS = colours.primary;
         SOFT = colours.onSurface;
         DIM = colours.onSurfaceVariant;
-        paint.setColor(colours.surface);
-        paint.setStyle(Paint.Style.FILL);
-        paint.setFilterBitmap(true);
-        canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-        glassBackdrop = GlassBackdrop.get(background, getWidth(), getHeight(), this);
-        if (background != null && !background.isRecycled()) {
-            drawCenterCrop(canvas, background, new RectF(0, 0, getWidth(), getHeight()));
-            paint.setColor(colours.surface);
-            paint.setAlpha(carNight ? 204 : 184);
-            canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-            paint.setAlpha(255);
+        glassBackdrop = GlassBackdrop.get(background, frameWidth(), frameHeight(), this);
+        if (!externalBackground) {
+            drawFrameBackground(canvas, frame());
         }
         if (lyricsVisible) {
             drawLyrics(canvas, true);
@@ -456,6 +453,51 @@ public final class BoardView extends View {
             }
             canvas.restore();
         }
+    }
+
+    /**
+     * The car surface is larger than the board (host chrome sits in the margins), so the
+     * screen draws the background across the whole surface and tells the board where it sits.
+     */
+    public void setFrame(int width, int height, float left, float top) {
+        if (width != frameW || height != frameH || left != frameX || top != frameY
+                || !externalBackground) {
+            frameW = width;
+            frameH = height;
+            frameX = left;
+            frameY = top;
+            externalBackground = true;
+            staticDirty = true;
+        }
+    }
+
+    /** Surface colour, background picture and scrim over {@code full} (frame coordinates). */
+    public void drawFrameBackground(Canvas canvas, RectF full) {
+        paint.setShader(null);
+        paint.setColor(colours.surface);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setFilterBitmap(true);
+        canvas.drawRect(full, paint);
+        if (background != null && !background.isRecycled()) {
+            drawCenterCrop(canvas, background, full);
+            paint.setColor(colours.surface);
+            paint.setAlpha(carNight ? 204 : 184);
+            canvas.drawRect(full, paint);
+            paint.setAlpha(255);
+        }
+    }
+
+    private int frameWidth() {
+        return frameW > 0 ? frameW : getWidth();
+    }
+
+    private int frameHeight() {
+        return frameH > 0 ? frameH : getHeight();
+    }
+
+    /** The whole frame in this view's coordinates. */
+    private RectF frame() {
+        return new RectF(-frameX, -frameY, frameWidth() - frameX, frameHeight() - frameY);
     }
 
     private void drawCenterCrop(Canvas canvas, Bitmap bitmap, RectF destination) {
@@ -521,8 +563,7 @@ public final class BoardView extends View {
             paint.setColor(0xFFFFFFFF);
             paint.setAlpha(255);
             paint.setFilterBitmap(true);
-            canvas.drawBitmap(glassBackdrop, null,
-                    new RectF(0, 0, getWidth(), getHeight()), paint);
+            canvas.drawBitmap(glassBackdrop, null, frame(), paint);
         }
         int alpha = background == null ? GlassTint.NO_PICTURE_ALPHA
                 : glassAlpha(shape, bounds, tint);
@@ -541,7 +582,8 @@ public final class BoardView extends View {
     }
 
     private int glassAlpha(Path shape, RectF bounds, int tint) {
-        String key = System.identityHashCode(background) + ":" + getWidth() + "x" + getHeight()
+        String key = System.identityHashCode(background) + ":" + frameWidth() + "x" + frameHeight()
+                + "@" + frameX + "," + frameY
                 + ":" + layout.toJson() + ":" + tint + ":" + colours.onSurface + ":"
                 + colours.onSurfaceVariant + ":" + bounds.left + "," + bounds.top + ","
                 + bounds.right + "," + bounds.bottom;
@@ -549,7 +591,9 @@ public final class BoardView extends View {
         if (cached != null) {
             return cached;
         }
-        double backdrop = GlassBackdrop.percentile90(background, getWidth(), getHeight(), shape);
+        Path inFrame = new Path(shape);
+        inFrame.offset(frameX, frameY);
+        double backdrop = GlassBackdrop.percentile90(background, frameWidth(), frameHeight(), inFrame);
         int alpha = colours.alphaForBackdrop(tint, backdrop);
         if (glassAlphas.size() >= 64) {
             glassAlphas.clear();
