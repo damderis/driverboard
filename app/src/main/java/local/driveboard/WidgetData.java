@@ -156,28 +156,32 @@ public final class WidgetData {
         }
         try {
             MediaSessionManager manager = c.getSystemService(MediaSessionManager.class);
-            MediaController paused = null;
-            PlaybackState pausedState = null;
+            MediaController resumable = null;
+            PlaybackState resumableState = null;
             for (MediaController controller : manager.getActiveSessions(
                     new ComponentName(c, MediaAccessService.class))) {
                 PlaybackState state = controller.getPlaybackState();
                 if (state != null && state.getState() == PlaybackState.STATE_PLAYING) {
                     return snapshotOf(controller, state, lc);
                 }
-                if (paused == null && state != null
-                        && state.getState() == PlaybackState.STATE_PAUSED
+                if (resumable == null && state != null
+                        && (state.getState() == PlaybackState.STATE_PAUSED
+                        || state.getState() == PlaybackState.STATE_STOPPED)
+                        && (state.getActions() & (PlaybackState.ACTION_PLAY
+                        | PlaybackState.ACTION_PLAY_PAUSE)) != 0
                         && controller.getMetadata() != null) {
-                    paused = controller;
-                    pausedState = state;
+                    resumable = controller;
+                    resumableState = state;
                 }
             }
-            if (paused != null) {
-                return snapshotOf(paused, pausedState, lc);
+            if (resumable != null) {
+                return snapshotOf(resumable, resumableState, lc);
             }
         } catch (RuntimeException ignored) {
             // Permission or the session may disappear during the snapshot.
         }
-        return new MediaSnapshot(lc.getString(R.string.media_nothing_playing), "", "", null,
+        return new MediaSnapshot(lc.getString(R.string.media_nothing_playing),
+                lc.getString(R.string.media_start_music), "", null,
                 0, 0, 0, 0, false, false);
     }
 

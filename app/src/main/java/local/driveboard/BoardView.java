@@ -348,7 +348,8 @@ public final class BoardView extends View {
             return false;
         }
         MediaControlLayout.Control control = targets == null ? null : targets.hit(x, y);
-        if (control == null) {
+        if (control == null || !WidgetData.supportsMediaAction(controlState,
+                controlAction(control))) {
             return false;
         }
         pressedControl = control;
@@ -417,6 +418,10 @@ public final class BoardView extends View {
     }
 
     private MediaControlLayout currentControlLayout() {
+        if (media == null || media.controller == null
+                || !WidgetData.supportsMediaAction(controlState, WidgetData.MEDIA_PLAY_PAUSE)) {
+            return null;
+        }
         if (lyricsVisible) {
             return lyricsControlLayout();
         }
@@ -427,10 +432,26 @@ public final class BoardView extends View {
     private void drawMediaControls(Canvas canvas) {
         MediaControlLayout targets = currentControlLayout();
         drawnControls = targets;
-        drawnControlBounds = lyricsVisible ? new RectF(0, 0, getWidth(), getHeight())
+        drawnControlBounds = targets == null ? null
+                : lyricsVisible ? new RectF(0, 0, getWidth(), getHeight())
                 : findCard("media") == null ? null : visualBounds(findCard("media"));
         if (targets == null) {
             return;
+        }
+        if (lyricsVisible && media.duration > 0) {
+            float inset = Math.max(12f * unit(), getWidth() * .035f);
+            float width = Math.min((getHeight() - 2f * inset) * .50f,
+                    (getWidth() - 2f * inset) * .31f);
+            float y = targets.playPause.top - 5f * unit();
+            float progress = Math.max(0f, Math.min(1f,
+                    (float) media.estimatedPositionMs() / media.duration));
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1.5f, unit()));
+            paint.setColor((BRASS & 0x00FFFFFF) | 0x4D000000);
+            canvas.drawLine(inset, y, inset + width, y, paint);
+            paint.setColor(BRASS);
+            canvas.drawLine(inset, y, inset + width * progress, y, paint);
+            paint.setStyle(Paint.Style.FILL);
         }
         int save = canvas.save();
         if (!lyricsVisible) {
@@ -1267,12 +1288,17 @@ public final class BoardView extends View {
         float titleSize = Math.min(20f * unit(), content.height() * .15f) * .80f;
         float titleY = artBounds.bottom + 8f * unit() + titleSize;
         if (staticPass && media != null) {
-            text(canvas, media.quran == null ? media.title
+            if (media.controller == null) {
+                drawEmptyMediaText(canvas, new RectF(content.left, artBounds.bottom,
+                        content.left + leftWidth, content.bottom), titleSize, titleSize * .72f);
+            } else {
+                text(canvas, media.quran == null ? media.title
                             : media.quran.surah.transliteration, content.left, titleY, titleSize,
-                    CREAM, Fonts.semibold(getContext()), leftWidth);
-            text(canvas, media.artist, content.left,
-                    titleY + titleSize * 1.2f, titleSize * .72f,
-                    SAGE, Fonts.regular(getContext()), leftWidth);
+                        CREAM, Fonts.semibold(getContext()), leftWidth);
+                text(canvas, media.artist, content.left,
+                        titleY + titleSize * 1.2f, titleSize * .72f,
+                        SAGE, Fonts.regular(getContext()), leftWidth);
+            }
         }
         float lyricLeft = content.left + leftWidth
                 + Math.max(16f * unit(), content.width() * .05f);
@@ -1526,27 +1552,31 @@ public final class BoardView extends View {
         canvas.restore();
     }
 
-    private void drawLyricsArt(Canvas canvas, RectF bounds) {
-        if (media != null && media.isQuranSession
-                && (media.art == null || media.art.isRecycled())) {
-            paint.setColor(colours.surfaceContainerHighest);
-            canvas.drawRoundRect(bounds, 12f * unit(), 12f * unit(), paint);
-            drawQuranText(canvas, media.quran == null ? DASH : media.quran.surah.arabic, bounds,
-                    bounds.height() * .30f, colours.primary, true, 4);
-            return;
+    private Bitmap mediaArtwork(int size) {
+        if (media == null) {
+            return null;
         }
+        if (media.art != null && !media.art.isRecycled()) {
+            return media.art;
+        }
+        return media.isQuranSession && media.quran != null
+                ? SurahArt.render(getContext(), media.quran.surah.number, size,
+                        colours.primaryContainer) : null;
+    }
+
+    private void drawLyricsArt(Canvas canvas, RectF bounds) {
+        Bitmap art = mediaArtwork(Math.round(bounds.width()));
         Path shape = ExpressiveShapes.cookie(bounds);
         paint.setColor(colours.surfaceContainerHighest);
         paint.setStyle(Paint.Style.FILL);
         canvas.drawPath(shape, paint);
-        if (media == null || media.art == null || media.art.isRecycled()) {
+        if (art == null) {
             text(canvas, "♫", bounds.left + bounds.width() * .34f,
                     bounds.centerY() + bounds.height() * .15f,
                     bounds.height() * .43f, SAGE,
                     Fonts.semibold(getContext()), bounds.width() * .5f);
             return;
         }
-        Bitmap art = media.art;
         BitmapShader shader = new BitmapShader(art,
                 Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         float scale = Math.max(bounds.width() / art.getWidth(),
@@ -1935,12 +1965,13 @@ public final class BoardView extends View {
                 artworkSize * .02f, 0x59000000);
         canvas.drawPath(artShape, paint);
         paint.clearShadowLayer();
-        if (media != null && media.art != null && !media.art.isRecycled()) {
+        Bitmap art = mediaArtwork(Math.round(artworkSize));
+        if (art != null) {
             paint.setShader(null);
             paint.setColor(0xFFFFFFFF);
             paint.setAlpha(255);
             paint.setFilterBitmap(true);
-            canvas.drawBitmap(artworkTile(media.art), null, artwork, paint);
+            canvas.drawBitmap(artworkTile(art), null, artwork, paint);
         } else {
             paint.setColor(colours.surfaceContainerHighest);
             canvas.drawPath(artShape, paint);
@@ -1968,8 +1999,14 @@ public final class BoardView extends View {
         String title = media == null || media.title == null ? DASH : media.title;
         String artist = media == null || media.artist == null ? "" : media.artist;
         boolean playing = media != null && media.playing;
+        boolean empty = media == null || media.controller == null;
         float titleSize = Math.min(19f * unit(), r.height() * .19f) * .75f;
         float artistSize = Math.min(13f * unit(), r.height() * .14f) * .80f;
+        if (empty) {
+            drawEmptyMediaText(canvas, new RectF(x, r.top, r.right, r.bottom),
+                    titleSize, artistSize);
+            return;
+        }
         MediaControlLayout controls = mediaControlLayout(r);
         float textTop = r.top;
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -2007,8 +2044,44 @@ public final class BoardView extends View {
         }
     }
 
+    private void drawEmptyMediaText(Canvas canvas, RectF bounds, float titleSize,
+            float artistSize) {
+        String title = media == null ? words.getString(R.string.media_nothing_playing)
+                : media.title;
+        String subtitle = media == null ? words.getString(R.string.media_start_music)
+                : media.artist;
+        TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        titlePaint.setTypeface(Fonts.semibold(getContext()));
+        titlePaint.setTextSize(titleSize);
+        titlePaint.setColor(CREAM);
+        Fonts.cardText(titlePaint);
+        TextPaint subtitlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        subtitlePaint.setTypeface(Fonts.regular(getContext()));
+        subtitlePaint.setTextSize(artistSize);
+        subtitlePaint.setColor(SAGE);
+        Fonts.cardText(subtitlePaint);
+        int width = Math.max(1, Math.round(bounds.width()));
+        StaticLayout heading = StaticLayout.Builder.obtain(title, 0, title.length(),
+                        titlePaint, width)
+                .setIncludePad(false).setMaxLines(1)
+                .setEllipsize(TextUtils.TruncateAt.END).build();
+        StaticLayout hint = StaticLayout.Builder.obtain(subtitle, 0, subtitle.length(),
+                        subtitlePaint, width)
+                .setIncludePad(false).setMaxLines(1)
+                .setEllipsize(TextUtils.TruncateAt.END).build();
+        float gap = artistSize * .30f;
+        canvas.save();
+        canvas.clipRect(bounds);
+        canvas.translate(bounds.left, bounds.centerY()
+                - (heading.getHeight() + gap + hint.getHeight()) / 2f);
+        heading.draw(canvas);
+        canvas.translate(0, heading.getHeight() + gap);
+        hint.draw(canvas);
+        canvas.restore();
+    }
+
     private void drawProgress(Canvas canvas) {
-        if (!isMediaPlaying() || media.duration <= 0) {
+        if (media == null || !media.hasTrack || media.duration <= 0) {
             return;
         }
         for (BoardLayout.Card card : layout.cards) {
