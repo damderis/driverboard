@@ -20,6 +20,7 @@ import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
+import android.text.TextDirectionHeuristics;
 import android.view.MotionEvent;
 import android.view.Choreographer;
 import android.view.View;
@@ -97,6 +98,19 @@ public final class BoardView extends View {
     private boolean lyricsVisible;
     private boolean lyricsLoading;
     private long lyricsPosition;
+    private QuranRepository.Document quranDocument;
+    private String quranEdition = QuranRepository.EN_SAHIH;
+    private QuranMetadata displayedQuran;
+    private QuranMetadata outgoingQuran;
+    private long quranTransitionAt;
+    private Typeface quranTypeface;
+    private final Map<String, StaticLayout> quranLayouts = new HashMap<>();
+
+    public boolean isQuranTransitioning() {
+        return lyricsVisible && media != null && media.quran != null
+                && outgoingQuran != null
+                && SystemClock.uptimeMillis() - quranTransitionAt < 320;
+    }
     private Bitmap staticLayer;
     private boolean staticDirty = true;
     private long staticDrawnAt;
@@ -234,6 +248,15 @@ public final class BoardView extends View {
 
     public int lyricsLineIndex() {
         return displayLyrics == null ? -1 : displayLyrics.lineIndexAt(currentLyricsPosition());
+    }
+
+    public void setQuran(QuranRepository.Document document, String edition) {
+        if (quranDocument == document && quranEdition.equals(edition)) {
+            return;
+        }
+        quranDocument = document;
+        quranEdition = edition;
+        invalidateStatic();
     }
 
     public boolean isMediaPlaying() {
@@ -492,7 +515,7 @@ public final class BoardView extends View {
             return;
         }
         frameScheduled = true;
-        if (isMediaPlaying() || isTransitioning()) {
+        if (isMediaPlaying() || isTransitioning() || isQuranTransitioning()) {
             Choreographer.getInstance().postFrameCallback(frameCallback);
         } else {
             Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, 1000);
@@ -583,6 +606,16 @@ public final class BoardView extends View {
         prayer = WidgetData.prayerSnapshot(words);
         weather = WeatherRepository.snapshot(words);
         media = WidgetData.mediaSnapshot(words);
+        QuranMetadata nextQuran = media.quran;
+        if (nextQuran == null || displayedQuran == null
+                || nextQuran.surah.number != displayedQuran.surah.number
+                || nextQuran.ayah != displayedQuran.ayah) {
+            outgoingQuran = nextQuran != null && displayedQuran != null
+                    && nextQuran.surah.number == displayedQuran.surah.number
+                    ? displayedQuran : null;
+            displayedQuran = nextQuran;
+            quranTransitionAt = SystemClock.uptimeMillis();
+        }
         if (lyrics != null && !lyrics.isTimed()) {
             long oldDuration = displayLyrics == null || displayLyrics.lines.length == 0 ? 0
                     : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs;
@@ -1231,7 +1264,8 @@ public final class BoardView extends View {
         float titleSize = Math.min(20f * unit(), content.height() * .15f) * .80f;
         float titleY = artBounds.bottom + 8f * unit() + titleSize;
         if (staticPass && media != null) {
-            text(canvas, media.title, content.left, titleY, titleSize,
+            text(canvas, media.quran == null ? media.title
+                            : media.quran.surah.transliteration, content.left, titleY, titleSize,
                     CREAM, Fonts.semibold(getContext()), leftWidth);
             text(canvas, media.artist, content.left,
                     titleY + titleSize * 1.2f, titleSize * .72f,
@@ -1241,6 +1275,13 @@ public final class BoardView extends View {
                 + Math.max(16f * unit(), content.width() * .05f);
         RectF lyricArea = new RectF(lyricLeft, content.top,
                 content.right, content.bottom);
+        if (media != null && media.isQuranSession) {
+            if (!staticPass) {
+                drawQuran(canvas, lyricArea);
+            }
+            canvas.restore();
+            return;
+        }
         if (lyricsLoading || lyrics == null || lyrics.isEmpty()) {
             if (staticPass) {
                 int message = lyricsLoading ? R.string.lyrics_loading
@@ -1301,6 +1342,10 @@ public final class BoardView extends View {
     }
 
     private void drawMovingLyrics(Canvas canvas) {
+        if (media != null && media.isQuranSession) {
+            drawLyrics(canvas, false);
+            return;
+        }
         if (displayLyrics != null && displayLyrics.isTimed() && !lyricsLoading
                 && !displayLyrics.isEmpty()) {
             drawLyrics(canvas, false);
@@ -1358,7 +1403,135 @@ public final class BoardView extends View {
         return new LyricBlock(displayLyrics, current, area, lines, gap, total);
     }
 
+    private void drawQuran(Canvas canvas, RectF area) {
+        QuranMetadata current = media.quran;
+        if (current == null) {
+            drawQuranText(canvas, DASH, area, Math.min(30f * unit(), area.height() * .2f),
+                    colours.onSurface, false, 1);
+            return;
+        }
+        float t = Math.min(1f, (SystemClock.uptimeMillis() - quranTransitionAt) / 320f);
+        float eased = 1f - (1f - t) * (1f - t) * (1f - t);
+        float travel = Math.min(18f * unit(), area.height() * .18f);
+        if (outgoingQuran != null && t < 1f) {
+            drawQuranAyah(canvas, area, outgoingQuran,
+                    -travel * eased, Math.round(255f * (1f - eased)));
+        }
+        drawQuranAyah(canvas, area, current, outgoingQuran == null ? 0 : travel * (1f - eased),
+                outgoingQuran == null ? 255 : Math.round(255f * eased));
+    }
+
+    private void drawQuranAyah(Canvas canvas, RectF area, QuranMetadata metadata,
+            float offset, int alpha) {
+        canvas.saveLayerAlpha(area, alpha);
+        canvas.clipRect(area);
+        canvas.translate(0, offset);
+        float h = area.height();
+        float gap = Math.max(2f * unit(), h * .025f);
+        if (metadata.ayah <= 0) {
+            drawQuranText(canvas, metadata.surah.arabic,
+                    new RectF(area.left, area.top, area.right, area.top + h * .6f),
+                    Math.min(36f * unit(), h * .27f), colours.primary, true, 4);
+            drawQuranText(canvas, DASH,
+                    new RectF(area.left, area.top + h * .65f, area.right, area.bottom),
+                    Math.min(17f * unit(), h * .13f), colours.onSurface, false, 4);
+            canvas.restore();
+            return;
+        }
+        String previous = quranDocument == null || metadata.ayah <= 1 ? ""
+                : quranDocument.text(QuranRepository.QURAN_UTHMANI, metadata.ayah - 1);
+        String arabic = quranDocument == null ? DASH
+                : quranDocument.text(QuranRepository.QURAN_UTHMANI, metadata.ayah);
+        String translation = quranDocument == null ? DASH
+                : quranDocument.text(quranEdition, metadata.ayah);
+        drawQuranText(canvas, previous,
+                new RectF(area.left, area.top, area.right, area.top + h * .16f),
+                Math.min(16f * unit(), h * .12f), withAlpha(colours.onSurface, .45f), true, 2);
+        drawQuranText(canvas, arabic,
+                new RectF(area.left, area.top + h * .16f + gap,
+                        area.right, area.top + h * .61f),
+                Math.min(34f * unit(), h * .25f), colours.primary, true, 4);
+        float radius = Math.min(12f * unit(), h * .075f);
+        float centerY = area.top + h * .69f;
+        paint.setColor(colours.primary);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(1f, unit()));
+        canvas.drawCircle(area.centerX(), centerY, radius, paint);
+        paint.setStyle(Paint.Style.FILL);
+        drawQuranText(canvas, "\u06dd", new RectF(area.centerX() - radius * 1.5f,
+                        centerY - radius * 1.5f, area.centerX() + radius * 1.5f,
+                        centerY + radius * 1.5f), radius * 2f,
+                withAlpha(colours.primary, .32f), true, 1);
+        drawQuranText(canvas, String.valueOf(metadata.ayah),
+                new RectF(area.centerX() - radius, centerY - radius,
+                        area.centerX() + radius, centerY + radius), radius * 1.05f,
+                colours.primary, false, 1);
+        drawQuranText(canvas, translation,
+                new RectF(area.left, area.top + h * .78f, area.right, area.bottom),
+                Math.min(16f * unit(), h * .12f), colours.onSurface, false, 4);
+        canvas.restore();
+    }
+
+    private void drawQuranText(Canvas canvas, String value, RectF area, float size,
+            int color, boolean arabic, int maxLines) {
+        if (value == null || value.isEmpty() || area.width() <= 0 || area.height() <= 0) {
+            return;
+        }
+        if (arabic && quranTypeface == null) {
+            quranTypeface = getResources().getFont(R.font.amiri_quran);
+        }
+        String key = value + "\u0000" + area.width() + ":" + area.height() + ":"
+                + size + ":" + color + ":" + arabic + ":" + maxLines;
+        StaticLayout cached = quranLayouts.get(key);
+        if (cached != null) {
+            canvas.save();
+            canvas.clipRect(area);
+            canvas.translate(area.left, area.centerY() - cached.getHeight() / 2f);
+            cached.draw(canvas);
+            canvas.restore();
+            return;
+        }
+        TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setTypeface(arabic ? quranTypeface : Fonts.regular(getContext()));
+        textPaint.setColor(color);
+        StaticLayout lines = null;
+        float candidate = Math.max(1f, size);
+        for (int attempt = 0; attempt < 60; attempt++) {
+            textPaint.setTextSize(candidate);
+            StaticLayout full = StaticLayout.Builder.obtain(value, 0, value.length(),
+                            textPaint, Math.max(1, (int) area.width()))
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                    .setTextDirection(arabic ? TextDirectionHeuristics.RTL
+                            : TextDirectionHeuristics.FIRSTSTRONG_LTR)
+                    .setIncludePad(arabic)
+                    .build();
+            lines = full;
+            if ((full.getLineCount() <= maxLines && full.getHeight() <= area.height())
+                    || candidate <= 1f) {
+                break;
+            }
+            candidate = Math.max(1f, candidate * .90f);
+        }
+        canvas.save();
+        if (quranLayouts.size() >= 48) {
+            quranLayouts.clear();
+        }
+        quranLayouts.put(key, lines);
+        canvas.clipRect(area);
+        canvas.translate(area.left, area.centerY() - lines.getHeight() / 2f);
+        lines.draw(canvas);
+        canvas.restore();
+    }
+
     private void drawLyricsArt(Canvas canvas, RectF bounds) {
+        if (media != null && media.isQuranSession
+                && (media.art == null || media.art.isRecycled())) {
+            paint.setColor(colours.surfaceContainerHighest);
+            canvas.drawRoundRect(bounds, 12f * unit(), 12f * unit(), paint);
+            drawQuranText(canvas, media.quran == null ? DASH : media.quran.surah.arabic, bounds,
+                    bounds.height() * .30f, colours.primary, true, 4);
+            return;
+        }
         Path shape = ExpressiveShapes.cookie(bounds);
         paint.setColor(colours.surfaceContainerHighest);
         paint.setStyle(Paint.Style.FILL);

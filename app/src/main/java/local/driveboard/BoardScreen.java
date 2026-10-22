@@ -60,8 +60,20 @@ public final class BoardScreen extends Screen {
                 return;
             }
             WidgetData.MediaSnapshot media = WidgetData.mediaSnapshot(getCarContext());
+            if (media.isQuranSession) {
+                String metadataKey = media.title + "\u0000" + media.artist + "\u0000"
+                        + (media.controller == null ? "" : media.controller.getSessionToken());
+                if (!metadataKey.equals(quranMetadataKey)) {
+                    quranMetadataKey = metadataKey;
+                    refreshNeeded = true;
+                    drawBoard();
+                }
+                handler.postDelayed(this, 250);
+                return;
+            }
             String key = media.hasTrack ? LyricsRepository.key(media) : "";
             if (!key.equals(lyricsTrackKey)) {
+                refreshNeeded = true;
                 drawBoard();
             } else {
                 int previous = board.lyricsLineIndex();
@@ -92,7 +104,8 @@ public final class BoardScreen extends Screen {
     private void onFrame(long nanos) {
         frameScheduled = false;
         if (!started || browserMode || surface == null || !surface.isValid()
-                || (!board.isMediaPlaying() && !board.isTransitioning())) {
+                || (!board.isMediaPlaying() && !board.isTransitioning()
+                        && !board.isQuranTransitioning())) {
             return;
         }
         if (board.isTransitioning() || nanos - lastFrame >= 1_000_000_000L / fps) {
@@ -111,7 +124,8 @@ public final class BoardScreen extends Screen {
 
     private void scheduleFrame() {
         if (started && !browserMode && surface != null && surface.isValid()
-                && (board.isMediaPlaying() || board.isTransitioning()) && !frameScheduled) {
+                && (board.isMediaPlaying() || board.isTransitioning()
+                        || board.isQuranTransitioning()) && !frameScheduled) {
             frameScheduled = true;
             android.view.Choreographer.getInstance().postFrameCallback(frameCallback);
         }
@@ -173,6 +187,11 @@ public final class BoardScreen extends Screen {
     private long callbackEpoch;
     private boolean lyricsVisible;
     private String lyricsTrackKey = "";
+    private String quranTrackKey = "";
+    private long quranRetryAt;
+    private boolean quranLoading;
+    private String quranMetadataKey = "";
+    private long quranEpoch;
     private Boolean lastNight;
     private String lastMode;
     private int lastDrawWidth;
@@ -310,6 +329,12 @@ public final class BoardScreen extends Screen {
         handler.removeCallbacks(lyricsTick);
         ++callbackEpoch;
         lyricsTrackKey = "";
+        quranTrackKey = "";
+        quranMetadataKey = "";
+        quranLoading = false;
+        quranRetryAt = 0;
+        quranEpoch++;
+        board.setQuran(null, QuranRepository.EN_SAHIH);
         board.setLyrics(null);
         board.setLyricsLoading(false);
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener);
@@ -855,10 +880,12 @@ public final class BoardScreen extends Screen {
             return;
         }
         lyricsVisible = !lyricsVisible;
+        quranEpoch++;
         board.setLyricsVisible(lyricsVisible);
         refreshNeeded = true;
         if (lyricsVisible) {
             lyricsTrackKey = "";
+            quranTrackKey = "";
             board.setLyrics(null);
             board.setLyricsLoading(false);
             handler.removeCallbacks(lyricsTick);
@@ -872,6 +899,49 @@ public final class BoardScreen extends Screen {
 
     private void updateLyrics() {
         WidgetData.MediaSnapshot media = WidgetData.mediaSnapshot(getCarContext());
+        if (media.isQuranSession) {
+            lyricsTrackKey = "";
+            board.setLyrics(null);
+            if (media.quran == null) {
+                quranTrackKey = "";
+                quranLoading = false;
+                quranRetryAt = 0;
+                quranEpoch++;
+                board.setQuran(null, QuranRepository.EN_SAHIH);
+                return;
+            }
+            String edition = "ms".equals(AppLocale.locale(getCarContext()).getLanguage())
+                    ? QuranRepository.MS_BASMEIH : QuranRepository.EN_SAHIH;
+            String key = media.quran.surah.number + ":" + edition;
+            if (!key.equals(quranTrackKey)) {
+                quranEpoch++;
+                quranTrackKey = key;
+                quranLoading = false;
+                quranRetryAt = 0;
+                board.setQuran(null, edition);
+            }
+            if (!quranLoading && android.os.SystemClock.elapsedRealtime() >= quranRetryAt) {
+                quranLoading = true;
+                long epoch = quranEpoch;
+                quranRetryAt = Long.MAX_VALUE;
+                QuranRepository.request(getCarContext(), media.quran.surah.number, result -> {
+                    if (!started || !lyricsVisible || epoch != quranEpoch
+                            || !key.equals(quranTrackKey)) {
+                        return;
+                    }
+                    quranLoading = false;
+                    quranRetryAt = result == null
+                            ? android.os.SystemClock.elapsedRealtime() + 30_000 : Long.MAX_VALUE;
+                    board.setQuran(result, edition);
+                    drawBoard();
+                });
+            }
+            return;
+        }
+        quranTrackKey = "";
+        quranMetadataKey = "";
+        quranEpoch++;
+        board.setQuran(null, QuranRepository.EN_SAHIH);
         String key = media.hasTrack ? LyricsRepository.key(media) : "";
         if (!key.equals(lyricsTrackKey)) {
             lyricsTrackKey = key;

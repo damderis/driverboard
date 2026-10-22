@@ -80,6 +80,16 @@ WCAG relative luminance, fixed cream `#F4EFE4` and sage `#A9C2BD` against each p
 
 ## Verification
 
+### Quran ayat view (round 16)
+
+The Quran Android session (`com.quran.labs.androidquran`) opens an ayat view in the lyrics slot. Surah and ayah come from session metadata rather than playback-time estimates. The dashboard shows the surah and ayah, with the reciter below. A surah-only title stays surah-only.
+
+The bundled 114-surah table is regenerated with `node tools/generate-quran-catalog.cjs` from `https://api.quran.com/api/v4/chapters`. Arabic and both translations come from `https://api.alquran.cloud/v1/surah/<n>/editions/quran-uthmani,ms.basmeih,en.sahih`; successful whole-surah editions are cached on disk. BM uses Basmeih, EN uses Sahih International. Failed requests leave a dash and remain retryable. Arabic uses the bundled OFL Amiri Quran font.
+
+Node HTTPS verification on 2026-10-22 returned HTTP 200 for both endpoints: chapters contained 114 entries totaling 6,236 ayahs; the surah 1 editions response had `code: 200`, `status: "OK"` and three `data` entries, each with `edition.identifier`, `number: 1`, `numberOfAyahs: 7` and ordered `ayahs` containing `numberInSurah` and `text`.
+
+Manual acceptance: play Al-Waqi'ah in Quran Android, open the now-playing card, and check ayah 84 and the next metadata update, previous ayah, reciter, art/fallback tile, wrapping and media controls. Check a long ayah, a surah-only title, BM/EN, offline cached and uncached surahs, recovery after network failure, stop/resume and disconnect/reconnect. Switch to music and check timed lyrics, then return to Quran. Recheck board/glass, weather and browser return in full and split layouts. No phone installation or interaction is part of this round's automated verification.
+
 Build/test/install results and visual review are recorded in `.impeccable/review/verification.md`. The car itself requires a drive: app discovery, actual surface size and visible regions, live phone edits/tone/language, battery API statuses, disconnect/reconnect, stop/resume. Also test location grant/deny, zone changes, offline prayer cache and midnight rollover, media access grant/revoke and real music playback. Google Maps and a 3D car remain outside this change.
 
 ## My car picture

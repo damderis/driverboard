@@ -42,6 +42,7 @@ public final class WidgetData {
     private static String cachedArtTrack = "";
     private static MediaSession.Token cachedArtSession;
     private static Bitmap cachedArt;
+    private static String loggedQuran = "";
 
     private WidgetData() {}
 
@@ -103,6 +104,8 @@ public final class WidgetData {
         public final boolean canPrevious;
         public final boolean canToggle;
         public final boolean canNext;
+        public final QuranMetadata quran;
+        public final boolean isQuranSession;
 
         public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
                 long position, long updatedAt, float speed, boolean playing, boolean hasTrack) {
@@ -113,7 +116,13 @@ public final class WidgetData {
         public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
                 long position, long updatedAt, float speed, boolean playing, boolean hasTrack,
                 MediaController controller, PlaybackState playbackState) {
-            this.title = title;
+            String description = controller == null || controller.getMetadata() == null ? ""
+                    : String.valueOf(controller.getMetadata().getDescription().getDescription());
+            isQuranSession = controller != null
+                    && "com.quran.labs.androidquran".equals(controller.getPackageName());
+            quran = QuranMetadata.parse(controller == null ? "" : controller.getPackageName(),
+                    title, description);
+            this.title = quran == null ? title : quran.heading();
             this.artist = artist;
             this.album = album;
             this.art = art;
@@ -183,15 +192,35 @@ public final class WidgetData {
         }
         String title = nonempty(data.getString(MediaMetadata.METADATA_KEY_TITLE),
                 data.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE));
-        String artist = nonempty(data.getString(MediaMetadata.METADATA_KEY_ARTIST), "\u2014");
+        String artist = nonempty(data.getString(MediaMetadata.METADATA_KEY_ARTIST),
+                data.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE));
+        if ("com.quran.labs.androidquran".equals(controller.getPackageName())) {
+            String description = String.valueOf(data.getDescription().getDescription());
+            if (artist == null || artist.trim().isEmpty()) {
+                int comma = description.lastIndexOf(',');
+                artist = comma < 0 ? null : description.substring(comma + 1).trim();
+            }
+        }
+        artist = nonempty(artist, "\u2014");
         String album = nonempty(data.getString(MediaMetadata.METADATA_KEY_ALBUM), "");
         long duration = data.getLong(MediaMetadata.METADATA_KEY_DURATION);
         String artKey = title + "\u0000" + artist + "\u0000" + duration;
         Bitmap art = artwork(data, controller.getSessionToken(), artKey);
-        return new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
+        MediaSnapshot snapshot = new MediaSnapshot(nonempty(title, lc.getString(R.string.media_playing)),
                 artist, album, art, duration, state.getPosition(),
                 state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), playing,
                 title != null && !title.trim().isEmpty(), controller, state);
+        if (snapshot.quran != null) {
+            String parsed = snapshot.quran.surah.number + ":" + snapshot.quran.ayah;
+            synchronized (WidgetData.class) {
+                if (!parsed.equals(loggedQuran)) {
+                    loggedQuran = parsed;
+                    CarDiagnostics.log(lc, "Quran parsed surah=" + snapshot.quran.surah.number
+                            + " ayah=" + snapshot.quran.ayah);
+                }
+            }
+        }
+        return snapshot;
     }
 
     /** Whether the session advertises the requested control in its current playback state. */
