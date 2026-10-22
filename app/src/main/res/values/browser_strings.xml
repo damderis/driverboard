@@ -1,0 +1,24 @@
+<resources>
+    <string name="web">Web</string>
+    <string name="browser_back">Back</string>
+    <string name="browser_forward">Forward</string>
+    <string name="browser_reload">Reload</string>
+    <string name="browser_youtube">YouTube</string>
+    <string name="browser_address_hint">Search or enter address</string>
+    <string name="browser_go">Go</string>
+    <string name="browser_keyboard_numbers">123</string>
+    <string name="browser_keyboard_letters">ABC</string>
+    <string name="browser_keyboard_space">Space</string>
+    <string name="browser_keyboard_done">Done</string>
+    <string name="browser_keyboard_enter">Enter</string>
+    <string name="browser_locked_title">Available when parked</string>
+    <string name="browser_locked_reason">This page is available when the car is parked.</string>
+    <string name="browser_waiting_gps">Waiting for GPS</string>
+    <string name="browser_permission_needed">Location permission needed on phone</string>
+    <string name="browser_moving">Moving</string>
+    <string name="browser_board">Board</string>
+    <string name="parked_detection">Parked detection</string>
+    <string name="parked_permission_grant">Allow location</string>
+    <string name="parked_permission_granted">Location permission granted</string>
+    <string name="parked_permission_denied">Location permission denied</string>
+</resources>

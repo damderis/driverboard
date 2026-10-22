@@ -1,0 +1,24 @@
+<resources>
+    <string name="web">Web</string>
+    <string name="browser_back">Kembali</string>
+    <string name="browser_forward">Maju</string>
+    <string name="browser_reload">Muat semula</string>
+    <string name="browser_youtube">YouTube</string>
+    <string name="browser_address_hint">Cari atau masukkan alamat</string>
+    <string name="browser_go">Pergi</string>
+    <string name="browser_keyboard_numbers">123</string>
+    <string name="browser_keyboard_letters">ABC</string>
+    <string name="browser_keyboard_space">Ruang</string>
+    <string name="browser_keyboard_done">Selesai</string>
+    <string name="browser_keyboard_enter">Masuk</string>
+    <string name="browser_locked_title">Hanya ketika parkir</string>
+    <string name="browser_locked_reason">Halaman ini tersedia apabila kereta diparkir.</string>
+    <string name="browser_waiting_gps">Menunggu GPS</string>
+    <string name="browser_permission_needed">Kebenaran lokasi diperlukan pada telefon</string>
+    <string name="browser_moving">Sedang bergerak</string>
+    <string name="browser_board">Papan</string>
+    <string name="parked_detection">Pengesanan parkir</string>
+    <string name="parked_permission_grant">Benarkan lokasi</string>
+    <string name="parked_permission_granted">Kebenaran lokasi diberikan</string>
+    <string name="parked_permission_denied">Kebenaran lokasi ditolak</string>
+</resources>

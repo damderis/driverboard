@@ -26,6 +26,18 @@ adb shell am start -W -n local.driveboard/.MainActivity
 
 Enable Unknown sources in Android Auto developer settings yourself, then connect and select DriveBoard. The development service accepts installed hosts using `ALLOW_ALL_HOSTS_VALIDATOR`; restrict signatures before distributing it.
 
+## Browser and parked detection
+
+The browser locks page content while the car is moving and unlocks it only when parked. With a fresh GPS fix (no older than 10 seconds), speed above 8 km/h is MOVING and speed at or below 8 km/h is PARKED. A fix remains usable for up to 120 seconds at or below 8 km/h; older or unavailable location is unknown and stays locked. When the device reports no speed, it must remain stationary for 10 seconds before the browser unlocks. Location access for parked detection is requested from the phone settings row only, after tapping its permission button; it does not request permission automatically or open phone settings. The existing coarse location request for prayer-zone lookup remains separate.
+
+YouTube runs signed out. Google sign-in is generally blocked in embedded WebViews, so use YouTube without signing in.
+
+BoardScreen owns a `DriveBoardBrowser` VirtualDisplay and native Presentation. Board drawing uses an independent parcel-created Surface wrapper from its first frame: opening the browser gates every Canvas draw, removes frame/tick callbacks, and releases that wrapper to disconnect the CPU producer before creating the display. Closing dismisses the Presentation, detaches and releases the VirtualDisplay, then clears the browser gate and resumes Canvas drawing with a new wrapper. Host-owned Surfaces are never released. Replacement surfaces attach with `setSurface` and `resize`; destruction detaches with `setSurface(null)`. The content and fullscreen video stay inside the stable area.
+
+The browser has its own keyboard and does not open the phone IME. Page focus reporting is installed in the top-level document only; iframe inputs are not supported. Android exposes `addJavascriptInterface` to all frames, so the bridge accepts only a request to recheck top-level focus, with no navigation, text, location, or native commands exposed. A lock pauses page media and blanks the page to stop cross-origin media too; unlocking reloads the saved URL without autoplay. Browser exit flushes cookies. With no reported speed, consecutive GPS fixes within a fixed 5 m envelope over at least 10 seconds establish the stationary estimate; a gap over 5 seconds resets it.
+
+Manual checks (unverified): use the Android Auto simulator for repeated Board → Web/YouTube → Board handoffs, surface destroy/reconnect, full/split resize, host action-strip insets, back/forward/reload, URL/search, page inputs, custom keyboard Enter/Done, scrolling/fling/zoom, fullscreen video, and EN/BM. Check permission denied/approximate/precise, disabled/missing GPS, stale moving fixes after 10 seconds, stale parked fixes after 120 seconds, and no-speed stationary fixes. A real parked/driving test must verify phone GPS access with the phone screen off, lock and media silence while moving, and return to parked without autoplay. After browser exit, verify the full-surface board background, glass, transitions, weather, media controls, lyrics, and existing 15-second draw-failure fallback.
+
 ## Location and prayer data
 
 Verified with Node HTTPS on 2026-10-21:

@@ -3,8 +3,11 @@ package local.driveboard;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Parcel;
 import android.util.Log;
 import android.view.Surface;
 import android.view.View;
@@ -45,7 +48,7 @@ public final class BoardScreen extends Screen {
         @Override
         public void run() {
             drawBoard();
-            if (started) {
+            if (started && !browserMode) {
                 scheduleTick();
             }
         }
@@ -53,7 +56,7 @@ public final class BoardScreen extends Screen {
     private final Runnable lyricsTick = new Runnable() {
         @Override
         public void run() {
-            if (!started || !lyricsVisible || surface == null || !surface.isValid()) {
+            if (!started || browserMode || !lyricsVisible || surface == null || !surface.isValid()) {
                 return;
             }
             WidgetData.MediaSnapshot media = WidgetData.mediaSnapshot(getCarContext());
@@ -88,7 +91,7 @@ public final class BoardScreen extends Screen {
 
     private void onFrame(long nanos) {
         frameScheduled = false;
-        if (!started || surface == null || !surface.isValid()
+        if (!started || browserMode || surface == null || !surface.isValid()
                 || (!board.isMediaPlaying() && !board.isTransitioning())) {
             return;
         }
@@ -107,7 +110,7 @@ public final class BoardScreen extends Screen {
     }
 
     private void scheduleFrame() {
-        if (started && surface != null && surface.isValid()
+        if (started && !browserMode && surface != null && surface.isValid()
                 && (board.isMediaPlaying() || board.isTransitioning()) && !frameScheduled) {
             frameScheduled = true;
             android.view.Choreographer.getInstance().postFrameCallback(frameCallback);
@@ -135,7 +138,7 @@ public final class BoardScreen extends Screen {
         if (consecutiveFailures >= 3 && now - lastRecovery >= 5000) {
             lastRecovery = now;
             handler.post(() -> {
-                if (!started) {
+                if (!started || browserMode) {
                     return;
                 }
                 CarDiagnostics.log(getCarContext(), "Re-registering surface callback after failures");
@@ -152,6 +155,16 @@ public final class BoardScreen extends Screen {
 
     private SurfaceContainer container;
     private Surface surface;
+    // Only this independent wrapper is ever connected to the Canvas CPU producer.
+    private Surface canvasSurface;
+    private boolean browserMode;
+    private boolean browserClosing;
+    private VirtualDisplay browserDisplay;
+    private BrowserPresentation browser;
+    private ParkedDetector parkedDetector;
+    private ParkedState.State browserLock;
+    private boolean browserPermission;
+    private String browserUrl = "https://www.google.com";
     private Rect visibleArea = new Rect();
     private Rect stableArea = new Rect();
     private Rect lastDrawArea = new Rect();
@@ -182,13 +195,31 @@ public final class BoardScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
-        return new NavigationTemplate.Builder()
-                .setActionStrip(new ActionStrip.Builder()
-                        .addAction(new Action.Builder()
-                                .setTitle(AppLocale.wrap(getCarContext()).getString(
-                                        lyricsVisible ? R.string.board : R.string.lyrics))
-                                .setOnClickListener(this::toggleLyrics).build()).build())
-                .build();
+        android.content.Context strings = AppLocale.wrap(getCarContext());
+        ActionStrip.Builder actions = new ActionStrip.Builder();
+        if (browserMode || lyricsVisible) {
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.board))
+                    .setOnClickListener(() -> {
+                        if (browserMode) {
+                            closeBrowser();
+                        } else {
+                            toggleLyrics();
+                        }
+                    }).build());
+        } else {
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.lyrics))
+                    .setOnClickListener(this::toggleLyrics).build());
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.web))
+                    .setOnClickListener(() -> openBrowser("https://www.google.com")).build());
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.browser_youtube))
+                    .setOnClickListener(() -> openBrowser("https://m.youtube.com")).build());
+        }
+        NavigationTemplate.Builder template = new NavigationTemplate.Builder()
+                .setActionStrip(actions.build());
+        if (browserMode && getCarContext().getCarAppApiLevel() >= 2) {
+            template.setMapActionStrip(new ActionStrip.Builder().addAction(Action.PAN).build());
+        }
+        return template.build();
     }
 
     private void startRendering() {
@@ -223,6 +254,30 @@ public final class BoardScreen extends Screen {
             public void onClick(float x, float y) {
                 onSurfaceClick(epoch, x, y);
             }
+            @Override
+            public void onScroll(float distanceX, float distanceY) {
+                handler.post(() -> {
+                    if (started && epoch == callbackEpoch && browser != null) {
+                        browser.scroll(distanceX, distanceY);
+                    }
+                });
+            }
+            @Override
+            public void onFling(float velocityX, float velocityY) {
+                handler.post(() -> {
+                    if (started && epoch == callbackEpoch && browser != null) {
+                        browser.fling(velocityX, velocityY);
+                    }
+                });
+            }
+            @Override
+            public void onScale(float focusX, float focusY, float scaleFactor) {
+                handler.post(() -> {
+                    if (started && epoch == callbackEpoch && browser != null) {
+                        browser.scale(scaleFactor);
+                    }
+                });
+            }
         };
         try {
             getCarContext().getCarService(AppManager.class).setSurfaceCallback(surfaceCallback);
@@ -245,6 +300,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = false;
+        closeBrowser();
         board.releaseMediaControls();
         board.cancelLayoutTransition();
         android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
@@ -300,6 +356,7 @@ public final class BoardScreen extends Screen {
         CarDiagnostics.log(getCarContext(), "Surface available " + nextContainer.getWidth()
                 + "x" + nextContainer.getHeight() + " dpi=" + nextContainer.getDpi());
         Surface nextSurface = nextContainer.getSurface();
+        releaseCanvasSurface();
         board.cancelLayoutTransition();
         lastMode = null;
         lastDrawWidth = 0;
@@ -320,7 +377,11 @@ public final class BoardScreen extends Screen {
                     .putInt("surface_height", nextContainer.getHeight())
                     .apply();
         }
-        drawBoard();
+        if (browserMode) {
+            attachBrowserSurface();
+        } else {
+            drawBoard();
+        }
         if (lyricsVisible) {
             handler.removeCallbacks(lyricsTick);
             handler.post(lyricsTick);
@@ -337,6 +398,7 @@ public final class BoardScreen extends Screen {
         }
         CarDiagnostics.log(getCarContext(), "Visible area=" + area);
         visibleArea = new Rect(area);
+        updateBrowserArea();
         drawBoard();
     }
 
@@ -350,6 +412,7 @@ public final class BoardScreen extends Screen {
         }
         CarDiagnostics.log(getCarContext(), "Stable area=" + area);
         stableArea = new Rect(area);
+        updateBrowserArea();
         drawBoard();
     }
 
@@ -373,6 +436,15 @@ public final class BoardScreen extends Screen {
     }
 
     private void releaseSurface() {
+        if (browserDisplay != null) {
+            try {
+                browserDisplay.setSurface(null);
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Browser surface detach failed: " + error);
+                closeBrowser();
+            }
+        }
+        releaseCanvasSurface();
         handler.removeCallbacks(lyricsTick);
         android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
         frameScheduled = false;
@@ -388,6 +460,214 @@ public final class BoardScreen extends Screen {
         stableArea.setEmpty();
     }
 
+    private static Surface copySurface(Surface hostSurface) {
+        Parcel parcel = Parcel.obtain();
+        try {
+            hostSurface.writeToParcel(parcel, 0);
+            parcel.setDataPosition(0);
+            return Surface.CREATOR.createFromParcel(parcel);
+        } finally {
+            parcel.recycle();
+        }
+    }
+
+    private void releaseCanvasSurface() {
+        if (canvasSurface != null) {
+            // Destroy the independent native Surface to disconnect its CPU producer.
+            // unlockCanvasAndPost alone does not disconnect it. Never release host surfaces.
+            canvasSurface.release();
+            canvasSurface = null;
+        }
+    }
+
+    private void openBrowser(String url) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> openBrowser(url));
+            return;
+        }
+        if (!started || browserClosing) {
+            return;
+        }
+        if (browserMode) {
+            if (browser != null) {
+                browser.loadUrl(url);
+            }
+            return;
+        }
+        // Drawing and mode changes run on main; any current Canvas has already been posted.
+        browserMode = true;
+        browserUrl = url;
+        lyricsVisible = false;
+        board.setLyricsVisible(false);
+        board.cancelLayoutTransition();
+        board.releaseMediaControls();
+        handler.removeCallbacks(tick);
+        handler.removeCallbacks(lyricsTick);
+        android.view.Choreographer.getInstance().removeFrameCallback(frameCallback);
+        frameScheduled = false;
+        releaseCanvasSurface();
+        CarDiagnostics.log(getCarContext(), "Browser open; Canvas producer disconnected");
+        browserLock = null;
+        browserPermission = false;
+        parkedDetector = new ParkedDetector(getCarContext(), this::onBrowserLock);
+        parkedDetector.start();
+        attachBrowserSurface();
+        invalidate();
+    }
+
+    private void attachBrowserSurface() {
+        if (!browserMode || browserClosing || container == null || surface == null
+                || !surface.isValid() || container.getWidth() <= 0 || container.getHeight() <= 0) {
+            return;
+        }
+        int width = container.getWidth();
+        int height = container.getHeight();
+        int dpi = Math.max(1, container.getDpi());
+        try {
+            if (browserDisplay == null) {
+                DisplayManager manager = getCarContext().getSystemService(DisplayManager.class);
+                if (manager == null) {
+                    throw new IllegalStateException("DisplayManager unavailable");
+                }
+                browserDisplay = manager.createVirtualDisplay("DriveBoardBrowser", width, height,
+                        dpi, surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION
+                                | DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY);
+                if (browserDisplay == null) {
+                    throw new IllegalStateException("VirtualDisplay unavailable");
+                }
+                CarDiagnostics.log(getCarContext(), "Browser VirtualDisplay create "
+                        + width + "x" + height + " dpi=" + dpi);
+                showBrowserPresentation();
+            } else {
+                browserDisplay.setSurface(surface);
+                browserDisplay.resize(width, height, dpi);
+                updateBrowserArea();
+            }
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(getCarContext(), "Browser display failed: " + error);
+            closeBrowser();
+        }
+    }
+
+    private void showBrowserPresentation() {
+        BrowserPresentation presentation = new BrowserPresentation(getCarContext(),
+                browserDisplay.getDisplay(), this::closeBrowser);
+        browser = presentation;
+        // Presentation cancels itself when display metrics change on some Android versions.
+        // Recreate its display-specific resources after that cancellation, keeping Canvas gated.
+        presentation.setOnCancelListener(dialog -> handler.post(() -> {
+            if (!started || !browserMode || browserClosing || browser != presentation) {
+                return;
+            }
+            try {
+                browserUrl = presentation.currentUrl();
+                presentation.close();
+                browser = null;
+                if (browserDisplay != null) {
+                    showBrowserPresentation();
+                }
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Browser presentation resize failed: " + error);
+                closeBrowser();
+            }
+        }));
+        presentation.show();
+        updateBrowserArea();
+        presentation.setLockState(browserLock == null ? ParkedState.State.UNKNOWN : browserLock,
+                browserPermission);
+        presentation.loadUrl(browserUrl);
+    }
+
+    private void updateBrowserArea() {
+        if (browser == null || container == null) {
+            return;
+        }
+        Rect bounds = new Rect(0, 0, container.getWidth(), container.getHeight());
+        Rect area = new Rect(stableArea);
+        if (area.isEmpty() || !area.intersect(bounds)) {
+            // Before the stable callback, visible is the safest available host inset.
+            area.set(visibleArea);
+        }
+        if (area.isEmpty() || !area.intersect(bounds)) {
+            area.set(bounds);
+        }
+        browser.setStableArea(area, bounds.width(), bounds.height());
+    }
+
+    private void onBrowserLock(ParkedState.State state, boolean permission) {
+        if (!browserMode) {
+            return;
+        }
+        if (state != browserLock || permission != browserPermission) {
+            CarDiagnostics.log(getCarContext(), "Browser lock=" + state
+                    + " precisePermission=" + permission);
+            browserLock = state;
+            browserPermission = permission;
+        }
+        if (browser != null) {
+            browser.setLockState(state, permission);
+        }
+    }
+
+    private void closeBrowser() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(this::closeBrowser);
+            return;
+        }
+        if (!browserMode || browserClosing) {
+            return;
+        }
+        browserClosing = true;
+        if (parkedDetector != null) {
+            parkedDetector.stop();
+            parkedDetector = null;
+        }
+        try {
+            if (browser != null) {
+                browser.close();
+            }
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(getCarContext(), "Browser dismissal failed: " + error);
+        } finally {
+            browser = null;
+        }
+        boolean disconnected = browserDisplay == null;
+        if (browserDisplay != null) {
+            try {
+                // Presentation is dismissed first; detach and release the display producer
+                // before allowing any new CPU Canvas connection to the host buffer queue.
+                browserDisplay.setSurface(null);
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Browser display detach failed: " + error);
+            }
+            try {
+                browserDisplay.release();
+                disconnected = true;
+                browserDisplay = null;
+                CarDiagnostics.log(getCarContext(), "Browser VirtualDisplay release; producer disconnected");
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Browser display release failed: " + error);
+            }
+        }
+        if (!disconnected) {
+            // Fail closed: never reconnect Canvas while a display producer may still exist.
+            getCarContext().finishCarApp();
+            return;
+        }
+        browserMode = false;
+        browserClosing = false;
+        lastMode = null;
+        lastDrawArea.setEmpty();
+        consecutiveFailures = 0;
+        refreshNeeded = true;
+        CarDiagnostics.log(getCarContext(), "Browser close; board drawing may resume");
+        invalidate();
+        if (started) {
+            scheduleTick();
+            requestDraw();
+        }
+    }
+
     private void drawBoard() {
         try {
             drawBoardInternal();
@@ -401,7 +681,7 @@ public final class BoardScreen extends Screen {
             handler.post(this::drawBoard);
             return;
         }
-        if (!started || container == null || surface == null) {
+        if (!started || browserMode || browserClosing || container == null || surface == null) {
             return;
         }
         if (!surface.isValid()) {
@@ -485,7 +765,10 @@ public final class BoardScreen extends Screen {
                     + " draw=" + drawWidth + "x" + drawHeight);
         }
         long frameStarted = android.os.SystemClock.elapsedRealtimeNanos();
-        Surface drawingSurface = surface;
+        if (canvasSurface == null) {
+            canvasSurface = copySurface(surface);
+        }
+        Surface drawingSurface = canvasSurface;
         Canvas canvas = null;
         boolean drawn = false;
         try {
@@ -541,8 +824,16 @@ public final class BoardScreen extends Screen {
             handler.post(() -> onSurfaceClick(epoch, x, y));
             return;
         }
-        if (!started || epoch != callbackEpoch || getCarContext().getCarAppApiLevel() < 5
-                || lastDrawArea.isEmpty() || !lastDrawArea.contains((int) x, (int) y)) {
+        if (!started || epoch != callbackEpoch || getCarContext().getCarAppApiLevel() < 5) {
+            return;
+        }
+        if (browserMode) {
+            if (browser != null) {
+                browser.click(x, y);
+            }
+            return;
+        }
+        if (lastDrawArea.isEmpty() || !lastDrawArea.contains((int) x, (int) y)) {
             return;
         }
         float localX = x - lastDrawArea.left;
@@ -558,6 +849,9 @@ public final class BoardScreen extends Screen {
     private void toggleLyrics() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             handler.post(this::toggleLyrics);
+            return;
+        }
+        if (browserMode) {
             return;
         }
         lyricsVisible = !lyricsVisible;
