@@ -21,4 +21,5 @@
     <string name="lyrics_loading">Finding lyrics…</string>
     <string name="lyrics_unavailable">No lyrics for this song</string>
     <string name="lyrics_no_track">No lyrics for this song</string>
+    <string name="lyrics_not_timed">Not timed</string>
 </resources>

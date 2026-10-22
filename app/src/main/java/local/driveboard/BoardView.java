@@ -93,6 +93,7 @@ public final class BoardView extends View {
     private int startH;
     private Runnable onEdit;
     private LyricsDocument lyrics;
+    private LyricsDocument displayLyrics;
     private boolean lyricsVisible;
     private boolean lyricsLoading;
     private long lyricsPosition;
@@ -216,6 +217,7 @@ public final class BoardView extends View {
             return;
         }
         lyrics = document;
+        displayLyrics = document == null ? null : document.estimated(media == null ? 0 : media.duration);
         displayedLyric = Integer.MIN_VALUE;
         clearLyricBlocks();
         if (lyricsVisible) {
@@ -231,7 +233,7 @@ public final class BoardView extends View {
     }
 
     public int lyricsLineIndex() {
-        return lyrics == null ? -1 : lyrics.lineIndexAt(currentLyricsPosition());
+        return displayLyrics == null ? -1 : displayLyrics.lineIndexAt(currentLyricsPosition());
     }
 
     public boolean isMediaPlaying() {
@@ -581,6 +583,15 @@ public final class BoardView extends View {
         prayer = WidgetData.prayerSnapshot(words);
         weather = WeatherRepository.snapshot(words);
         media = WidgetData.mediaSnapshot(words);
+        if (lyrics != null && !lyrics.isTimed()) {
+            long oldDuration = displayLyrics == null || displayLyrics.lines.length == 0 ? 0
+                    : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs;
+            displayLyrics = lyrics.estimated(media == null ? 0 : media.duration);
+            if (oldDuration != (displayLyrics.lines.length == 0 ? 0
+                    : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs)) {
+                displayedLyric = Integer.MIN_VALUE;
+            }
+        }
         bindMediaControls();
         background = BackgroundStore.load(getContext());
         colours = BoardColours.current(getContext(), media == null ? null : media.art);
@@ -807,7 +818,7 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
         canvas.drawBitmap(staticLayer, 0, 0, paint);
         if (lyricsVisible) {
-            drawTimedLyrics(canvas);
+            drawMovingLyrics(canvas);
         } else {
             drawProgress(canvas);
         }
@@ -1028,10 +1039,14 @@ public final class BoardView extends View {
         if (background != null && !background.isRecycled()) {
             drawCenterCrop(canvas, background, full);
             paint.setColor(colours.surface);
-            paint.setAlpha(carNight ? 204 : 184);
+            paint.setAlpha(backgroundScrimAlpha());
             canvas.drawRect(full, paint);
             paint.setAlpha(255);
         }
+    }
+
+    private int backgroundScrimAlpha() {
+        return carNight ? 140 : 97;
     }
 
     private int frameWidth() {
@@ -1111,17 +1126,22 @@ public final class BoardView extends View {
             paint.setAlpha(255);
             paint.setFilterBitmap(true);
             canvas.drawBitmap(glassBackdrop, null, frame(), paint);
+            paint.setColor(colours.surface);
+            paint.setAlpha(backgroundScrimAlpha());
+            canvas.drawPath(shape, paint);
+            paint.setAlpha(255);
         }
         int alpha = background == null ? GlassTint.NO_PICTURE_ALPHA
                 : glassAlpha(shape, bounds, tint);
         paint.setColor((alpha << 24) | (tint & 0x00FFFFFF));
         canvas.drawPath(shape, paint);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(2f * getResources().getDisplayMetrics().density);
+        // The centered 2 px stroke is clipped to leave a 1 px inner edge.
+        paint.setStrokeWidth(2f);
         paint.setColor(0xFFFFFFFF);
         paint.setShader(new LinearGradient(bounds.left, bounds.top,
-                bounds.right, bounds.bottom,
-                0x38FFFFFF, 0x0FFFFFFF, Shader.TileMode.CLAMP));
+                bounds.left, bounds.top + bounds.height() * .35f,
+                0x47FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         canvas.drawPath(shape, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.FILL);
@@ -1129,6 +1149,9 @@ public final class BoardView extends View {
     }
 
     private int glassAlpha(Path shape, RectF bounds, int tint) {
+        if (glassBackdrop == null || glassBackdrop.isRecycled()) {
+            return colours.worstCaseGlassAlpha(tint);
+        }
         if (isTransitioning() && renderingCardType != null) {
             Integer held = transitionGlassAlphas.get(renderingCardType);
             if (held != null) {
@@ -1138,7 +1161,7 @@ public final class BoardView extends View {
             Path inFrame = new Path(shape);
             inFrame.offset(frameX, frameY);
             double backdrop = GlassBackdrop.percentile90(background,
-                    frameWidth(), frameHeight(), inFrame);
+                    frameWidth(), frameHeight(), inFrame, colours.surface, backgroundScrimAlpha());
             int alpha = colours.alphaForBackdrop(tint, backdrop);
             transitionGlassAlphas.put(renderingCardType, alpha);
             lastCardGlassAlphas.put(renderingCardType, alpha);
@@ -1146,7 +1169,8 @@ public final class BoardView extends View {
         }
         String key = System.identityHashCode(background) + ":" + frameWidth() + "x" + frameHeight()
                 + "@" + frameX + "," + frameY
-                + ":" + layout.toJson() + ":" + tint + ":" + colours.onSurface + ":"
+                + ":" + backgroundScrimAlpha() + ":" + layout.toJson() + ":" + tint
+                + ":" + colours.onSurface + ":"
                 + colours.onSurfaceVariant + ":" + bounds.left + "," + bounds.top + ","
                 + bounds.right + "," + bounds.bottom;
         Integer cached = glassAlphas.get(key);
@@ -1158,7 +1182,8 @@ public final class BoardView extends View {
         }
         Path inFrame = new Path(shape);
         inFrame.offset(frameX, frameY);
-        double backdrop = GlassBackdrop.percentile90(background, frameWidth(), frameHeight(), inFrame);
+        double backdrop = GlassBackdrop.percentile90(background, frameWidth(), frameHeight(),
+                inFrame, colours.surface, backgroundScrimAlpha());
         int alpha = colours.alphaForBackdrop(tint, backdrop);
         if (glassAlphas.size() >= 64) {
             glassAlphas.clear();
@@ -1227,7 +1252,15 @@ public final class BoardView extends View {
             canvas.restore();
             return;
         }
-        if (lyrics.isTimed()) {
+        if (!lyrics.isTimed()) {
+            if (staticPass) {
+                text(canvas, words.getString(R.string.lyrics_not_timed), lyricArea.left,
+                        lyricArea.top + 10f * unit(), 9f * unit(), DIM,
+                        Fonts.regular(getContext()), lyricArea.width());
+            }
+            lyricArea.top += 15f * unit();
+        }
+        if (displayLyrics != null && displayLyrics.isTimed()) {
             if (!staticPass) {
                 int current = Math.max(0, lyricsLineIndex());
                 long now = SystemClock.uptimeMillis();
@@ -1267,8 +1300,9 @@ public final class BoardView extends View {
         canvas.restore();
     }
 
-    private void drawTimedLyrics(Canvas canvas) {
-        if (lyrics != null && lyrics.isTimed() && !lyricsLoading && !lyrics.isEmpty()) {
+    private void drawMovingLyrics(Canvas canvas) {
+        if (displayLyrics != null && displayLyrics.isTimed() && !lyricsLoading
+                && !displayLyrics.isEmpty()) {
             drawLyrics(canvas, false);
         }
     }
@@ -1276,7 +1310,7 @@ public final class BoardView extends View {
     private void drawLyricBlock(Canvas canvas, RectF area, int current,
             boolean outgoing, float offsetY, int alpha) {
         LyricBlock block = outgoing ? outgoingLyricBlock : currentLyricBlock;
-        if (block == null || !block.matches(lyrics, current, area)) {
+        if (block == null || !block.matches(displayLyrics, current, area)) {
             block = createLyricBlock(area, current);
             if (outgoing) {
                 outgoingLyricBlock = block;
@@ -1302,10 +1336,14 @@ public final class BoardView extends View {
 
     private LyricBlock createLyricBlock(RectF area, int current) {
         int[] indexes = {current - 1, current, current + 1, current + 2};
-        int[] colors = {withAlpha(SAGE, .5f), BRASS,
-                withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)};
+        boolean timed = lyrics != null && lyrics.isTimed();
+        int[] colors = timed
+                ? new int[] {withAlpha(SAGE, .5f), BRASS,
+                        withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)}
+                : new int[] {CREAM, CREAM, CREAM, CREAM};
         float mainSize = Math.min(25f * unit(), area.height() * .22f) * .70f;
         float sideSize = Math.min(16f * unit(), area.height() * .14f) * .70f;
+        if (!timed) mainSize = sideSize;
         float gap = Math.max(2f * unit(), area.height() * .045f);
         StaticLayout[] lines = lyricLayouts(indexes, colors, area.width(),
                 mainSize, sideSize, true);
@@ -1317,7 +1355,7 @@ public final class BoardView extends View {
                     mainSize * scale, sideSize * scale, true);
             total = lyricBlockHeight(lines, gap);
         }
-        return new LyricBlock(lyrics, current, area, lines, gap, total);
+        return new LyricBlock(displayLyrics, current, area, lines, gap, total);
     }
 
     private void drawLyricsArt(Canvas canvas, RectF bounds) {
@@ -1353,17 +1391,18 @@ public final class BoardView extends View {
         StaticLayout[] layouts = new StaticLayout[indexes.length];
         for (int i = 0; i < indexes.length; i++) {
             int index = indexes[i];
-            if (index < 0 || index >= lyrics.lines.length) {
+            if (index < 0 || index >= displayLyrics.lines.length) {
                 continue;
             }
-            String line = lyrics.lines[index].text;
+            String line = displayLyrics.lines[index].text;
             if (line == null || line.isEmpty()) {
                 continue;
             }
             boolean current = i == 1 && hasCurrent;
             TextPaint lyricPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
             lyricPaint.setColor(colors[i]);
-            lyricPaint.setTypeface(current ? Fonts.semibold(getContext())
+            lyricPaint.setTypeface(current && lyrics != null && lyrics.isTimed()
+                    ? Fonts.semibold(getContext())
                     : Fonts.regular(getContext()));
             Fonts.cardText(lyricPaint);
             lyricPaint.setTextSize(i == 1 ? mainSize : sideSize);

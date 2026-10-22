@@ -91,6 +91,21 @@ public final class LyricsDocument {
         return true;
     }
 
+    /** Evenly spaces nonblank plain lines for approximate progress display. */
+    public LyricsDocument estimated(long durationMs) {
+        if (isTimed() || durationMs <= 0 || plainText.isEmpty()) return this;
+        List<String> text = new ArrayList<>();
+        for (String raw : plainText.split("\\r?\\n")) {
+            if (!raw.trim().isEmpty()) text.add(raw.trim());
+        }
+        if (text.isEmpty()) return this;
+        Line[] estimated = new Line[text.size()];
+        for (int i = 0; i < text.size(); i++) {
+            estimated[i] = new Line(durationMs * i / text.size(), text.get(i));
+        }
+        return new LyricsDocument(plainText, estimated);
+    }
+
     /** Returns -1 before the first timestamp, or when lyrics are not timed. */
     public int lineIndexAt(long positionMs) {
         int low = 0;

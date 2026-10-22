@@ -9,6 +9,8 @@ import android.graphics.RectF;
 import android.graphics.Region;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -55,7 +57,8 @@ final class GlassBackdrop {
         }
     }
 
-    static double percentile90(Bitmap small, Path shape, int boardWidth, int boardHeight) {
+    static double percentile90(Bitmap small, Path shape, int boardWidth, int boardHeight,
+            int scrim, int scrimAlpha) {
         if (small == null || small.isRecycled() || boardWidth <= 0 || boardHeight <= 0) {
             return 0;
         }
@@ -74,7 +77,8 @@ final class GlassBackdrop {
                     point[0] = (x + .5f) * boardWidth / width;
                     point[1] = (y + .5f) * boardHeight / height;
                     if (region.contains(Math.round(point[0]), Math.round(point[1]))) {
-                        values[count++] = pixelLuminance(pixels[y * width + x]);
+                        values[count++] = pixelLuminance(BackdropPixels.scrim(
+                                pixels[y * width + x], scrim, scrimAlpha));
                     }
                 }
             }
@@ -87,7 +91,8 @@ final class GlassBackdrop {
         }
     }
 
-    static double percentile90(Bitmap picture, int width, int height, Path shape) {
+    static double percentile90(Bitmap picture, int width, int height, Path shape,
+            int scrim, int scrimAlpha) {
         if (picture == null || picture.isRecycled() || width <= 0 || height <= 0) {
             return 0;
         }
@@ -96,7 +101,7 @@ final class GlassBackdrop {
                 if (entry.picture == picture && entry.width == width
                         && entry.height == height && entry.small != null
                         && !entry.small.isRecycled()) {
-                    return percentile90(entry.small, shape, width, height);
+                    return percentile90(entry.small, shape, width, height, scrim, scrimAlpha);
                 }
             }
         }
@@ -120,11 +125,12 @@ final class GlassBackdrop {
                 return;
             }
         }
+        long started = SystemClock.elapsedRealtime();
         Bitmap result = null;
         Bitmap small = null;
         try {
-            int width = Math.max(1, (entry.width + 7) / 8);
-            int height = Math.max(1, (entry.height + 7) / 8);
+            int width = Math.max(1, (entry.width + 3) / 4);
+            int height = Math.max(1, (entry.height + 3) / 4);
             Bitmap sample = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             try {
                 Canvas canvas = new Canvas(sample);
@@ -141,16 +147,47 @@ final class GlassBackdrop {
                 canvas.drawBitmap(entry.picture, source, new RectF(0, 0, width, height), paint);
                 int[] pixels = new int[width * height];
                 sample.getPixels(pixels, 0, width, 0, 0, width, height);
-                int[] blurred = BoxBlur.blur(pixels, width, height, 12);
+                // Three boxes at quarter scale approximate a Gaussian with
+                // sigma sqrt((5*6 + 5*6 + 6*7) / 3) * 4 = 23.3 full pixels.
+                int[] blurred = pixels;
+                for (int pass = 0; pass < 3; pass++) {
+                    blurred = BoxBlur.blur(blurred, width, height, pass == 2 ? 6 : 5);
+                }
+                BackdropPixels.saturate(blurred);
                 small = Bitmap.createBitmap(blurred, width, height,
                         Bitmap.Config.ARGB_8888);
                 result = Bitmap.createScaledBitmap(small, entry.width, entry.height, true);
+                if (!result.isMutable()) {
+                    result = result.copy(Bitmap.Config.ARGB_8888, true);
+                }
+                // Fine grain is frozen once at final resolution, never enlarged.
+                int[] fullPixels = new int[entry.width * entry.height];
+                result.getPixels(fullPixels, 0, entry.width, 0, 0, entry.width, entry.height);
+                BackdropPixels.grain(fullPixels);
+                result.setPixels(fullPixels, 0, entry.width, 0, 0, entry.width, entry.height);
+                int[] samples = new int[width * height];
+                for (int y = 0; y < height; y++) {
+                    int sy = Math.min(entry.height - 1,
+                            (int) ((y + .5) * entry.height / height));
+                    for (int x = 0; x < width; x++) {
+                        int sx = Math.min(entry.width - 1,
+                                (int) ((x + .5) * entry.width / width));
+                        samples[y * width + x] = fullPixels[sy * entry.width + sx];
+                    }
+                }
+                if (small != result) {
+                    small.recycle();
+                }
+                small = Bitmap.createBitmap(samples, width, height, Bitmap.Config.ARGB_8888);
             } finally {
                 sample.recycle();
             }
         } catch (RuntimeException ignored) {
             // A valid tint remains available if the source bitmap disappears mid-build.
         }
+        Log.i("DriveBoardGlass", "Backdrop build " + entry.width + "x" + entry.height
+                + " elapsedMs=" + (SystemClock.elapsedRealtime() - started)
+                + " success=" + (result != null));
         synchronized (ENTRIES) {
             entry.result = result;
             entry.small = small;

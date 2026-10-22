@@ -53,4 +53,16 @@ public class LyricsDocumentTest {
         assertFalse(LyricsDocument.sameArtist("Lyla", "Aziz Harun"));
         assertFalse(LyricsDocument.sameArtist("", ""));
     }
+
+    @Test
+    public void estimatesPlainLineProgressWithoutBlankLines() {
+        LyricsDocument plain = LyricsDocument.parse("", "First\n\nSecond\nThird");
+        LyricsDocument estimated = plain.estimated(90_000);
+        assertFalse(plain.isTimed());
+        assertEquals(3, estimated.lines.length);
+        assertEquals(0, estimated.lineIndexAt(0));
+        assertEquals(0, estimated.lineIndexAt(29_999));
+        assertEquals(1, estimated.lineIndexAt(30_000));
+        assertEquals(2, estimated.lineIndexAt(60_000));
+    }
 }

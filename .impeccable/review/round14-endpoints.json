@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-22",
+  "method": "Node HTTPS GET with desktop Chrome User-Agent and https://music.163.com/ Referer",
+  "lrclib": {
+    "url": "https://lrclib.net/api/get?track_name=Hello&artist_name=Adele&duration=295",
+    "method": "Node HTTPS GET with DriveBoard endpoint verification User-Agent",
+    "http_status": 200,
+    "title": "Hello",
+    "artist": "Adele",
+    "synced_present": true,
+    "plain_present": true
+  },
+  "search": {
+    "url": "https://music.163.com/api/search/get?s=Shape%20of%20You%20Ed%20Sheeran&type=1&limit=10",
+    "http_status": 200,
+    "code": 200,
+    "song_count": 10,
+    "first_result": {
+      "id": 451703096,
+      "name": "Shape of You",
+      "artist": "Ed Sheeran",
+      "duration_ms": 233712
+    }
+  },
+  "lyric": {
+    "url": "https://music.163.com/api/song/lyric?id=451703096&lv=1",
+    "http_status": 200,
+    "code": 200,
+    "timed_lrc_present": true,
+    "first_timed_line": "[00:00.000] 制作人 : Steve Mac"
+  },
+  "caveat": "A separate Hello/Adele search hit (3377030) returned an empty lrc; candidate lyrics must be checked before acceptance."
+}

@@ -43,11 +43,26 @@ public final class LyricsRepository {
     };
     private static final Map<String, List<Callback>> WAITING = new HashMap<>();
 
+    private static final class ProviderFailure extends Exception {
+        final LyricsDocument available;
+        final String source;
+
+        ProviderFailure(LyricsDocument available, Exception cause) {
+            this(available, cause, "lrclib");
+        }
+
+        ProviderFailure(LyricsDocument available, Exception cause, String source) {
+            super(cause);
+            this.available = available;
+            this.source = source;
+        }
+    }
+
     private LyricsRepository() {}
 
     public static String key(WidgetData.MediaSnapshot media) {
-        // v2: earlier builds cached misses caused by album and artist matching bugs.
-        return "v2\u0000" + media.title.trim().toLowerCase(Locale.ROOT) + "\u0000"
+        // v3: normalized metadata and the second provider change previous misses.
+        return "v3\u0000" + media.title.trim().toLowerCase(Locale.ROOT) + "\u0000"
                 + media.artist.trim().toLowerCase(Locale.ROOT) + "\u0000"
                 + Math.max(0, Math.round(media.duration / 1000f));
     }
@@ -80,13 +95,22 @@ public final class LyricsRepository {
             try {
                 result = readCache(app, key);
                 if (result == null) {
-                    result = lookup(media);
+                    result = lookup(app, media);
                     writeCache(app, key, result);
+                } else {
+                    logResult(app, "cache", "stored", result);
                 }
+            } catch (ProviderFailure e) {
+                result = e.available;
+                failed = true;
+                CarDiagnostics.log(app, "lyrics source=" + e.source + " match=partial timed="
+                        + (result != null && result.isTimed()) + " fallback=error");
             } catch (Exception e) {
                 // Network or "server busy" errors are retried next time, not remembered as no lyrics.
                 failed = true;
                 Log.w(TAG, "Lyrics lookup unavailable", e);
+                CarDiagnostics.log(app, "lyrics source=network match=error timed=false "
+                        + e.getClass().getSimpleName());
             }
             LyricsDocument finalResult = result == null || result.isEmpty() ? null : result;
             List<Callback> callbacks;
@@ -106,67 +130,164 @@ public final class LyricsRepository {
         });
     }
 
-    private static LyricsDocument lookup(WidgetData.MediaSnapshot media) throws Exception {
-        // Players' album names ("Playback - AH") rarely match LRCLIB, so exact lookups skip them.
-        String query = "track_name=" + encode(media.title) + "&artist_name=" + encode(media.artist);
+    private static LyricsDocument lookup(Context context, WidgetData.MediaSnapshot media) throws Exception {
+        String title = LyricsMatch.title(media.title);
+        String artist = LyricsMatch.leadArtist(media.artist);
+        // Players' album names rarely match LRCLIB, so exact lookups skip them.
+        String query = "track_name=" + encode(title) + "&artist_name=" + encode(artist);
         String[] exactQueries = media.duration > 0
                 ? new String[] {query + "&duration=" + Math.round(media.duration / 1000f), query}
                 : new String[] {query};
+        LyricsDocument best = null;
+        int bestScore = Integer.MIN_VALUE;
+        String bestMatch = "none";
+        Exception lookupFailure = null;
+        List<JSONObject> matches = new ArrayList<>();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        java.util.HashSet<String> exactIds = new java.util.HashSet<>();
         for (String exactQuery : exactQueries) {
             JSONObject exact = null;
             try {
                 exact = getObject(BASE + "get?" + exactQuery);
             } catch (Exception e) {
                 Log.w(TAG, "Exact lyrics lookup failed; trying search", e);
+                lookupFailure = e;
             }
-            LyricsDocument document = fromJson(exact);
-            if (document != null && !document.isEmpty()) {
-                return document;
+            if (exact != null && LyricsMatch.sameTitle(exact.optString("trackName"), title)
+                    && LyricsMatch.sameArtist(exact.optString("artistName"), artist)
+                    && seen.add(exact.optString("id", "") + "\u0000"
+                            + exact.optString("duration", ""))) {
+                matches.add(exact);
+                exactIds.add(exact.optString("id", ""));
             }
         }
-
-        JSONArray candidates = getArray(BASE + "search?track_name=" + encode(media.title));
-        if (candidates == null) {
-            return null;
-        }
-        LyricsDocument best = null;
-        int bestScore = Integer.MIN_VALUE;
-        for (int i = 0; i < Math.min(candidates.length(), 30); i++) {
-            JSONObject entry = candidates.optJSONObject(i);
-            if (entry == null) {
+        String[] searches = {
+                BASE + "search?q=" + encode(title + " " + artist),
+                BASE + "search?track_name=" + encode(title)
+        };
+        for (String search : searches) {
+            JSONArray candidates;
+            try {
+                candidates = getArray(search);
+            } catch (Exception e) {
+                Log.w(TAG, "Lyrics search failed; trying remaining sources", e);
+                lookupFailure = e;
                 continue;
             }
-            String title = entry.optString("trackName", "").trim();
-            String artist = entry.optString("artistName", "").trim();
-            if (!title.equalsIgnoreCase(media.title.trim())
-                    || !LyricsDocument.sameArtist(artist, media.artist)) {
-                continue;
-            }
-            int score = 0;
-            if (media.duration > 0) {
-                long difference = Math.abs(Math.round(media.duration / 1000f)
-                        - Math.round(entry.optDouble("duration", 0)));
-                if (difference > 12) {
-                    continue;
+            if (candidates == null) continue;
+            for (int i = 0; i < Math.min(candidates.length(), 50); i++) {
+                JSONObject entry = candidates.optJSONObject(i);
+                if (entry != null && LyricsMatch.sameTitle(entry.optString("trackName"), title)
+                        && LyricsMatch.sameArtist(entry.optString("artistName"), artist)
+                        && seen.add(entry.optString("id", "") + "\u0000"
+                                + entry.optString("duration", ""))) {
+                    matches.add(entry);
                 }
-                score -= difference;
             }
+        }
+        for (JSONObject entry : matches) {
+            double duration = entry.optDouble("duration", 0);
+            if (!LyricsMatch.durationMatches(media.duration, duration, matches.size())) continue;
             LyricsDocument parsed = fromJson(entry);
-            if (parsed == null || parsed.isEmpty()) {
-                continue;
+            if (parsed == null) continue;
+            int score = parsed.isTimed() ? 100 : 0;
+            if (media.duration > 0 && duration > 0) {
+                score -= Math.round(Math.abs(media.duration / 1000f - (float) duration));
             }
-            if (parsed.isTimed()) {
-                score += 20;
-            }
-            if (entry.optString("albumName", "").equalsIgnoreCase(media.album)) {
-                score += 3;
-            }
+            if (entry.optString("albumName", "").equalsIgnoreCase(media.album)) score += 3;
             if (score > bestScore) {
-                bestScore = score;
                 best = parsed;
+                bestScore = score;
+                bestMatch = exactIds.contains(entry.optString("id", "")) ? "exact" : "search";
             }
+        }
+        if (best == null || !best.isTimed()) {
+            LyricsDocument fallback;
+            try {
+                fallback = lookupNetEase(media, title, artist);
+            } catch (ProviderFailure e) {
+                logResult(context, e.available == null ? "lrclib" : "netease",
+                        "search-partial", e.available == null ? best : e.available);
+                throw new ProviderFailure(e.available != null ? e.available : best, e,
+                        e.available != null ? e.source : "lrclib");
+            } catch (Exception e) {
+                // Return any LRCLIB plain text, but don't cache while the fallback is down.
+                throw new ProviderFailure(best, e);
+            }
+            if (fallback != null && (best == null || fallback.isTimed())) {
+                logResult(context, "netease", "search", fallback);
+                if (lookupFailure != null) {
+                    throw new ProviderFailure(fallback, lookupFailure, "netease");
+                }
+                return fallback;
+            }
+        }
+        logResult(context, best == null ? "none" : "lrclib", bestMatch, best);
+        if (lookupFailure != null) {
+            throw new ProviderFailure(best, lookupFailure);
         }
         return best;
+    }
+
+    private static LyricsDocument lookupNetEase(WidgetData.MediaSnapshot media,
+            String title, String artist) throws Exception {
+        JSONObject response = getObject("https://music.163.com/api/search/get?s="
+                + encode(title + " " + artist) + "&type=1&limit=10");
+        if (response == null || response.optInt("code", -1) != 200) {
+            throw new java.io.IOException("NetEase search unavailable");
+        }
+        JSONObject result = response == null ? null : response.optJSONObject("result");
+        JSONArray songs = result == null ? null : result.optJSONArray("songs");
+        if (songs == null) throw new java.io.IOException("NetEase search missing songs");
+        List<JSONObject> matches = new ArrayList<>();
+        for (int i = 0; i < songs.length(); i++) {
+            JSONObject song = songs.optJSONObject(i);
+            if (song == null || !LyricsMatch.sameTitle(song.optString("name"), title)) continue;
+            JSONArray artists = song.optJSONArray("artists");
+            JSONObject first = artists == null ? null : artists.optJSONObject(0);
+            if (first != null && LyricsMatch.sameArtist(first.optString("name"), artist)) {
+                matches.add(song);
+            }
+        }
+        LyricsDocument best = null;
+        double bestDiff = Double.MAX_VALUE;
+        Exception candidateFailure = null;
+        for (JSONObject song : matches) {
+            double seconds = song.optDouble("duration", 0) / 1000.0;
+            if (seconds <= 0 || (media.duration > 0
+                    && Math.abs(media.duration / 1000.0 - seconds) > 12)) continue;
+            long id = song.optLong("id", 0);
+            if (id <= 0) continue;
+            JSONObject lyric;
+            try {
+                lyric = getObject("https://music.163.com/api/song/lyric?id=" + id
+                        + "&lv=1");
+                if (lyric == null || lyric.optInt("code", -1) != 200) {
+                    throw new java.io.IOException("NetEase lyric unavailable");
+                }
+            } catch (Exception e) {
+                candidateFailure = e;
+                continue;
+            }
+            JSONObject lrc = lyric == null ? null : lyric.optJSONObject("lrc");
+            LyricsDocument parsed = LyricsDocument.parse(lrc == null ? "" : lrc.optString("lyric"), "");
+            if (parsed.isEmpty() || !parsed.isTimed()) continue;
+            double diff = media.duration <= 0 ? 0 : Math.abs(media.duration / 1000.0 - seconds);
+            if (best == null || (parsed.isTimed() && !best.isTimed()) || diff < bestDiff) {
+                best = parsed;
+                bestDiff = diff;
+            }
+        }
+        if (candidateFailure != null) {
+            throw new ProviderFailure(best, candidateFailure, "netease");
+        }
+        return best;
+    }
+
+    private static void logResult(Context context, String source, String match,
+            LyricsDocument document) {
+        CarDiagnostics.log(context, "lyrics source=" + source + " match=" + match
+                + " timed=" + (document != null && document.isTimed()));
     }
 
     private static LyricsDocument fromJson(JSONObject object) {
@@ -194,16 +315,20 @@ public final class LyricsRepository {
 
     private static String fetch(String address) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
-        connection.setRequestProperty("User-Agent", "DriveBoard (personal Android Auto app)");
+        boolean netease = address.startsWith("https://music.163.com/");
+        connection.setRequestProperty("User-Agent", netease
+                ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+                : "DriveBoard (personal Android Auto app)");
+        if (netease) connection.setRequestProperty("Referer", "https://music.163.com/");
         connection.setConnectTimeout(8000);
         connection.setReadTimeout(8000);
         try {
             int status = connection.getResponseCode();
-            if (status == 404) {
+            if (status == 404 && address.startsWith(BASE + "get?")) {
                 return null;
             }
             if (status != 200) {
-                throw new java.io.IOException("LRCLIB HTTP " + status);
+                throw new java.io.IOException("Lyrics HTTP " + status);
             }
             return WidgetData.readLimited(connection, MAX_RESPONSE);
         } finally {
