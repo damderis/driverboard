@@ -1,4 +1,4 @@
-﻿# DriveBoard design record
+# DriveBoard design record
 
 ## Round 7 ? Material 3 Expressive (2026-10-21)
 
@@ -39,3 +39,9 @@ This revision removes board section headings, centres the larger glance content,
 The parked-phone My car editor accepts only the owner's selected picture, stores a downscaled private PNG, and previews connected paint recolouring with preserved shading. No car photograph is bundled. The board uses only the saved render, cached by its preference revision. Source image provenance belongs to the user-selected file.
 
 Round 3 review is source review by Astra 6 plus automated tests/build. No screenshots or phone interaction were performed; visual acceptance remains with the owner. Earlier screenshot verdicts above describe the previous revision only.
+
+## Round 17: narrow car panels
+
+Draw areas below 0.85 width/height use an automatic, noneditable narrow layout; full starts at 1.4 and split fills the interval. Narrow uses all 12 columns: prayer rows 0-2, clock rows 3-4, weather row 5. The vertical stack gives the clock and weather full text width even on smaller panels. A media card saved in split replaces narrow weather only during playback. Full and split preferences remain independent of narrow geometry.
+
+Prayer uses a pill at aspect ratio 1.8 or above, otherwise a rounded rectangle with radius 22% of its short side. Its prayer schedule fits five columns, then a centered 3+2 grid, then yields its space to the next-prayer summary when the measured text cannot fit.

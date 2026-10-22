@@ -40,7 +40,8 @@ public final class BoardScreen extends Screen {
                 if (!"surface_width".equals(key) && !"surface_height".equals(key)
                         && !"visible_width".equals(key) && !"visible_height".equals(key)
                         && !"full_width".equals(key) && !"full_height".equals(key)
-                        && !"split_width".equals(key) && !"split_height".equals(key)) {
+                        && !"split_width".equals(key) && !"split_height".equals(key)
+                        && !"narrow_width".equals(key) && !"narrow_height".equals(key)) {
                     requestDraw();
                 }
             };
@@ -735,7 +736,7 @@ public final class BoardScreen extends Screen {
 
         int drawWidth = drawArea.width();
         int drawHeight = drawArea.height();
-        String mode = drawWidth / (float) drawHeight < 1.4f ? Store.SPLIT : Store.FULL;
+        String mode = BoardLayout.modeFor(drawWidth, drawHeight);
         String prefix = mode + "_";
         if (prefs.getInt(prefix + "width", 0) != drawWidth
                 || prefs.getInt(prefix + "height", 0) != drawHeight) {

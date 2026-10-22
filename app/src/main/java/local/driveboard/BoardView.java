@@ -584,7 +584,8 @@ public final class BoardView extends View {
     }
 
     public void setMode(String value) {
-        String next = Store.SPLIT.equals(value) ? Store.SPLIT : Store.FULL;
+        String next = Store.NARROW.equals(value) ? Store.NARROW
+                : Store.SPLIT.equals(value) ? Store.SPLIT : Store.FULL;
         if (!next.equals(mode)) {
             if (!transitionPending) {
                 prepareLayoutTransition(getWidth(), getHeight());
@@ -919,14 +920,15 @@ public final class BoardView extends View {
         if ("media".equals(c.type)) {
             pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
         } else if ("prayer".equals(c.type)) {
-            pad = Math.max(7f * unit(),
-                    Math.min(22f * unit(), Math.min(r.width(), r.height()) * .18f));
+            float radius = BoardLayout.prayerRadius(r.width(), r.height());
+            pad = Math.min(Math.min(r.width(), r.height()) * .28f,
+                    Math.max(3f * unit(), radius * .40f));
         }
         RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
         if ("clock".equals(c.type)) {
             drawClock(canvas, content);
         } else if ("prayer".equals(c.type)) {
-            drawPrayer(canvas, content, c.h);
+            drawPrayer(canvas, content);
         } else if ("media".equals(c.type)) {
             drawMedia(canvas, content);
         } else if ("weather".equals(c.type)) {
@@ -1126,7 +1128,8 @@ public final class BoardView extends View {
                         Path.Direction.CW);
             }
         } else if ("prayer".equals(type)) {
-            path.addRoundRect(bounds, radius * .5f, radius * .5f, Path.Direction.CW);
+            float prayerRadius = BoardLayout.prayerRadius(bounds.width(), bounds.height());
+            path.addRoundRect(bounds, prayerRadius, prayerRadius, Path.Direction.CW);
         } else if ("media".equals(type)) {
             path.addRoundRect(bounds, radius * .22f, radius * .22f, Path.Direction.CW);
         } else {
@@ -1674,7 +1677,7 @@ public final class BoardView extends View {
                 Fonts.regular(getContext()), r.width());
     }
 
-    private void drawPrayer(Canvas canvas, RectF r, int gridRows) {
+    private void drawPrayer(Canvas canvas, RectF r) {
         WidgetData.PrayerRow next = null;
         if (prayer != null && prayer.rows != null) {
             for (WidgetData.PrayerRow row : prayer.rows) {
@@ -1685,7 +1688,19 @@ public final class BoardView extends View {
             }
         }
         boolean stale = prayer != null && "stale".equals(prayer.status);
-        float limit = gridRows >= 3 ? r.top + r.height() * .72f : r.bottom;
+        WidgetData.PrayerRow[] rows = prayer == null ? null : prayer.rows;
+        float rowTimeSize = 11f * unit();
+        float rowNameSize = rowTimeSize * .82f;
+        float rowHeight = prayerRowHeight(rowNameSize, rowTimeSize);
+        float minColumnWidth = prayerColumnWidth(rows, rowNameSize, rowTimeSize);
+        float summaryHeight = Math.min(r.height(), Math.max(28f * unit(),
+                2.5f * Math.min(14f * unit(), r.height() * .22f)));
+        int columns = rows != null && rows.length == 5
+                ? BoardLayout.prayerRowColumns(r.width(),
+                        r.height() - summaryHeight - 3f * unit(),
+                        minColumnWidth, rowHeight) : 0;
+        float rowTop = r.bottom - rowHeight * (columns == 3 ? 2 : 1);
+        float limit = columns == 0 ? r.bottom : rowTop - 3f * unit();
         float star = Math.min(28f * unit(), Math.max(10f * unit(), r.height() * .36f));
         star = Math.min(star, Math.min(r.width() * .15f, (limit - r.top) * .62f));
         float x = r.left;
@@ -1709,8 +1724,9 @@ public final class BoardView extends View {
             }
             stateText(canvas, stateMessage, new RectF(x, r.top, r.right, limit),
                     Math.min(16f * unit(), r.height() * .22f), stale ? DIM : SOFT);
-            if (gridRows >= 3 && prayer != null && prayer.rows != null && prayer.rows.length == 5) {
-                drawPrayerRow(canvas, r, prayer.rows);
+            if (columns != 0) {
+                drawPrayerRows(canvas, r, rows, columns, rowTop,
+                        rowHeight, rowNameSize, rowTimeSize);
             }
             return;
         }
@@ -1719,10 +1735,32 @@ public final class BoardView extends View {
                 available * .57f)) * .80f;
         float countSize = Math.min(18f * unit(), Math.min(r.height() * .22f,
                 available * .42f)) * .85f;
-        float blockHeight = titleSize + countSize * 1.12f;
-        float titleY = r.top + (available - blockHeight) / 2f + titleSize;
         titleSize = fit(title + "  " + next.time, titleSize, width,
                 Fonts.semibold(getContext()));
+        paint.setTypeface(Fonts.semibold(getContext()));
+        paint.setTextSize(titleSize);
+        Paint.FontMetrics titleMetrics = paint.getFontMetrics();
+        paint.setTypeface(Fonts.medium(getContext()));
+        paint.setTextSize(countSize);
+        Paint.FontMetrics countMetrics = paint.getFontMetrics();
+        float gap = 2f * unit();
+        float blockHeight = titleMetrics.descent - titleMetrics.ascent + gap
+                + countMetrics.descent - countMetrics.ascent;
+        if (blockHeight > available) {
+            float scale = available / blockHeight;
+            titleSize *= scale;
+            countSize *= scale;
+            gap *= scale;
+            paint.setTypeface(Fonts.semibold(getContext()));
+            paint.setTextSize(titleSize);
+            titleMetrics = paint.getFontMetrics();
+            paint.setTypeface(Fonts.medium(getContext()));
+            paint.setTextSize(countSize);
+            countMetrics = paint.getFontMetrics();
+            blockHeight = titleMetrics.descent - titleMetrics.ascent + gap
+                    + countMetrics.descent - countMetrics.ascent;
+        }
+        float titleY = r.top + (available - blockHeight) / 2f - titleMetrics.ascent;
         text(canvas, title, x, titleY, titleSize,
                 stale ? DIM : colours.onPrimaryContainer,
                 Fonts.semibold(getContext()), width);
@@ -1750,7 +1788,7 @@ public final class BoardView extends View {
             countdown = DASH;
         }
         String displayCountdown = countdown;
-        float countdownY = Math.min(limit, titleY + countSize * 1.12f);
+        float countdownY = titleY + titleMetrics.descent + gap - countMetrics.ascent;
         text(canvas, displayCountdown, x, countdownY, countSize,
                 stale ? DIM : withAlpha(colours.onPrimaryContainer, .8f),
                 Fonts.medium(getContext()), width);
@@ -1758,24 +1796,53 @@ public final class BoardView extends View {
             paint.setTypeface(Fonts.regular(getContext()));
             paint.setTextSize(countSize);
             float suffixX = x + paint.measureText(displayCountdown + "  ");
-            float zoneSize = Math.min(11f * unit(), r.height() * .42f);
+            float zoneSize = Math.min(11f * unit(), countSize);
             if (suffixX < r.right - 8f * unit()) {
                 text(canvas, "\u00b7 " + prayer.zoneCode, suffixX, countdownY, zoneSize,
                         SAGE, Fonts.regular(getContext()), r.right - suffixX);
             }
         }
-        if (gridRows >= 3 && prayer != null && prayer.rows != null
-                && prayer.rows.length == 5) {
-            drawPrayerRow(canvas, r, prayer.rows);
+        if (columns != 0) {
+            drawPrayerRows(canvas, r, rows, columns, rowTop,
+                    rowHeight, rowNameSize, rowTimeSize);
         }
     }
 
-    private void drawPrayerRow(Canvas canvas, RectF r, WidgetData.PrayerRow[] rows) {
-        float top = r.top + r.height() * .72f;
-        float col = r.width() / 5f;
-        float height = r.bottom - top;
-        float timeSize = Math.min(11f * unit(), height / 2.6f);
-        float nameSize = timeSize * .82f;
+    private float prayerRowHeight(float nameSize, float timeSize) {
+        paint.setTypeface(Fonts.medium(getContext()));
+        paint.setTextSize(nameSize);
+        Paint.FontMetrics nameMetrics = paint.getFontMetrics();
+        paint.setTypeface(Fonts.regular(getContext()));
+        paint.setTextSize(timeSize);
+        Paint.FontMetrics timeMetrics = paint.getFontMetrics();
+        return nameMetrics.descent - nameMetrics.ascent
+                + timeMetrics.descent - timeMetrics.ascent
+                + timeSize * .28f + 2f * unit();
+    }
+
+    private float prayerColumnWidth(WidgetData.PrayerRow[] rows,
+            float nameSize, float timeSize) {
+        float widest = 0f;
+        if (rows != null) {
+            for (WidgetData.PrayerRow row : rows) {
+                paint.setTypeface(Fonts.medium(getContext()));
+                Fonts.cardText(paint);
+                paint.setTextSize(nameSize);
+                widest = Math.max(widest, paint.measureText(
+                        row.name == null ? DASH : row.name));
+                paint.setTypeface(Fonts.regular(getContext()));
+                Fonts.cardText(paint);
+                paint.setTextSize(timeSize);
+                widest = Math.max(widest, paint.measureText(
+                        row.time == null ? DASH : row.time));
+            }
+        }
+        return widest + 4f * unit();
+    }
+
+    private void drawPrayerRows(Canvas canvas, RectF r, WidgetData.PrayerRow[] rows,
+            int columns, float top, float rowHeight, float nameSize, float timeSize) {
+        float col = r.width() / columns;
         paint.setTypeface(Fonts.medium(getContext()));
         paint.setTextSize(nameSize);
         Paint.FontMetrics nameMetrics = paint.getFontMetrics();
@@ -1785,11 +1852,15 @@ public final class BoardView extends View {
         float gap = timeSize * .28f;
         float blockHeight = nameMetrics.descent - nameMetrics.ascent + gap
                 + timeMetrics.descent - timeMetrics.ascent;
-        float nameY = top + (height - blockHeight) / 2f - nameMetrics.ascent;
-        float timeY = nameY + nameMetrics.descent + gap - timeMetrics.ascent;
         for (int i = 0; i < 5; i++) {
             WidgetData.PrayerRow row = rows[i];
-            float center = r.left + (i + .5f) * col;
+            int line = columns == 3 && i >= 3 ? 1 : 0;
+            float center = line == 1
+                    ? r.centerX() + (i - 3.5f) * col
+                    : r.left + (i + .5f) * col;
+            float lineTop = top + line * rowHeight;
+            float nameY = lineTop + (rowHeight - blockHeight) / 2f - nameMetrics.ascent;
+            float timeY = nameY + nameMetrics.descent + gap - timeMetrics.ascent;
             int color = row.past || (prayer != null && "stale".equals(prayer.status))
                     ? DIM : CREAM;
             centeredText(canvas, row.name, center, nameY,
@@ -2275,7 +2346,7 @@ public final class BoardView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (!editing || getWidth() == 0 || getHeight() == 0) {
+        if (!editing || Store.NARROW.equals(mode) || getWidth() == 0 || getHeight() == 0) {
             return false;
         }
         switch (event.getActionMasked()) {

@@ -55,6 +55,37 @@ public final class BoardLayout {
         return b;
     }
 
+    public static String modeFor(float width, float height) {
+        float aspect = width / Math.max(1f, height);
+        return aspect < .85f ? "narrow" : aspect >= 1.4f ? "full" : "split";
+    }
+
+    public static float prayerRadius(float width, float height) {
+        return Math.min(width, height) * (width / Math.max(1f, height) >= 1.8f ? .5f : .22f);
+    }
+
+    /** Returns five columns, a 3+2 grid, or zero when the summary needs the space. */
+    public static int prayerRowColumns(float width, float availableHeight,
+            float minColumnWidth, float rowHeight) {
+        if (width >= 5 * minColumnWidth && availableHeight >= rowHeight) {
+            return 5;
+        }
+        return width >= 3 * minColumnWidth && availableHeight >= 2 * rowHeight ? 3 : 0;
+    }
+
+    // Full-width clock and weather keep the vertical panel easy to read.
+    public static BoardLayout narrowDefaults(boolean playing, BoardLayout split) {
+        boolean hasMedia = false;
+        for (Card card : split.cards) {
+            hasMedia |= "media".equals(card.type);
+        }
+        BoardLayout b = new BoardLayout();
+        b.cards.add(new Card("prayer", 0, 0, 12, 3));
+        b.cards.add(new Card("clock", 0, 3, 12, 2));
+        b.cards.add(new Card(playing && hasMedia ? "media" : "weather", 0, 5, 12, 1));
+        return b;
+    }
+
     public static BoardLayout splitDefaults() {
         BoardLayout b = new BoardLayout();
         b.cards.add(new Card("prayer", 0, 0, 12, 3));
@@ -111,12 +142,14 @@ public final class BoardLayout {
             boolean prayer = false;
             boolean clock = false;
             boolean weather = false;
+            boolean media = false;
             for (Card c : b.cards) {
                 prayer |= "prayer".equals(c.type);
                 clock |= "clock".equals(c.type);
                 weather |= "weather".equals(c.type);
+                media |= "media".equals(c.type);
             }
-            return b.cards.size() == 3 && prayer && clock && weather
+            return b.cards.size() == 3 && prayer && clock && (weather || media)
                     ? b : splitDefaults();
         }
         if (b.cards.size() == 4) {

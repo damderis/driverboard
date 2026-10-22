@@ -100,6 +100,35 @@ public class BoardLayoutTest {
         }
     }
 
+    @Test
+    public void automaticModesAndNarrowStack() {
+        assertEquals("narrow", BoardLayout.modeFor(588, 1008));
+        assertEquals("narrow", BoardLayout.modeFor(849, 1000));
+        assertEquals("split", BoardLayout.modeFor(850, 1000));
+        assertEquals("split", BoardLayout.modeFor(1399, 1000));
+        assertEquals("full", BoardLayout.modeFor(1400, 1000));
+        BoardLayout split = BoardLayout.splitDefaults();
+        assertEquals("prayer:0,0,12,3;clock:0,3,12,2;weather:0,5,12,1",
+                positions(BoardLayout.narrowDefaults(true, split)));
+        split.cards.set(2, new BoardLayout.Card("media", 6, 3, 6, 3));
+        assertEquals(split.toJson(), BoardLayout.fromJson(split.toJson(), true).toJson());
+        assertEquals("media", BoardLayout.narrowDefaults(true, split).cards.get(2).type);
+        assertEquals("weather", BoardLayout.narrowDefaults(false, split).cards.get(2).type);
+    }
+
+    @Test
+    public void prayerShapeAndRowFitRespectBoundaries() {
+        assertEquals(50f, BoardLayout.prayerRadius(180, 100), .001f);
+        assertEquals(22f, BoardLayout.prayerRadius(179, 100), .001f);
+        assertEquals(22f, BoardLayout.prayerRadius(100, 180), .001f);
+        assertEquals(5, BoardLayout.prayerRowColumns(500, 40, 100, 40));
+        assertEquals(3, BoardLayout.prayerRowColumns(499, 80, 100, 40));
+        assertEquals(3, BoardLayout.prayerRowColumns(300, 80, 100, 40));
+        assertEquals(0, BoardLayout.prayerRowColumns(300, 79, 100, 40));
+        assertEquals(0, BoardLayout.prayerRowColumns(299, 80, 100, 40));
+        assertEquals(0, BoardLayout.prayerRowColumns(500, 39, 100, 40));
+    }
+
     private static String positions(BoardLayout b) {
         StringBuilder s = new StringBuilder();
         for (BoardLayout.Card c : b.cards) {

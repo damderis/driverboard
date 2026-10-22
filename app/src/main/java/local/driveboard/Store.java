@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 public final class Store {
     public static final String FULL = "full";
     public static final String SPLIT = "split";
+    public static final String NARROW = "narrow";
     private Store() {}
     public static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences("driveboard", Context.MODE_PRIVATE);
@@ -16,6 +17,10 @@ public final class Store {
     }
 
     public static BoardLayout layout(Context context, String mode) {
+        if (NARROW.equals(mode)) {
+            return BoardLayout.narrowDefaults(WidgetData.mediaSnapshot(context).playing,
+                    layout(context, SPLIT));
+        }
         SharedPreferences p = prefs(context);
         String saved = p.getString(layoutKey(mode), null);
         String legacy = p.getString("layout", null);
