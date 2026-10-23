@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.os.SystemClock;
+import android.view.KeyEvent;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
@@ -168,23 +169,35 @@ public final class WidgetData {
         }
         try {
             MediaSessionManager manager = c.getSystemService(MediaSessionManager.class);
+            ArrayList<MediaController> controllers = new ArrayList<>();
+            ArrayList<PlaybackState> states = new ArrayList<>();
+            ArrayList<MediaCandidate> candidates = new ArrayList<>();
             MediaController resumable = null;
             PlaybackState resumableState = null;
             for (MediaController controller : manager.getActiveSessions(
                     new ComponentName(c, MediaAccessService.class))) {
                 PlaybackState state = controller.getPlaybackState();
-                if (state != null && state.getState() == PlaybackState.STATE_PLAYING) {
-                    return snapshotOf(controller, state, lc);
-                }
-                if (resumable == null && state != null
+                boolean canResume = state != null
                         && (state.getState() == PlaybackState.STATE_PAUSED
                         || state.getState() == PlaybackState.STATE_STOPPED)
                         && (state.getActions() & (PlaybackState.ACTION_PLAY
                         | PlaybackState.ACTION_PLAY_PAUSE)) != 0
-                        && controller.getMetadata() != null) {
+                        && controller.getMetadata() != null;
+                controllers.add(controller);
+                states.add(state);
+                candidates.add(new MediaCandidate(state == null ? 0 : state.getState(),
+                        state == null ? 0 : state.getPosition(),
+                        state == null ? 0 : state.getBufferedPosition(),
+                        controller.getPackageName(), canResume));
+                if (resumable == null && canResume) {
                     resumable = controller;
                     resumableState = state;
                 }
+            }
+            // Quran's idle phone session reports playing at 0:00 alongside the car session.
+            int selected = selectMediaCandidate(candidates);
+            if (selected >= 0) {
+                return snapshotOf(controllers.get(selected), states.get(selected), lc);
             }
             if (resumable != null) {
                 return snapshotOf(resumable, resumableState, lc);
@@ -195,6 +208,66 @@ public final class WidgetData {
         return new MediaSnapshot(lc.getString(R.string.media_nothing_playing),
                 lc.getString(R.string.media_start_music), "", null,
                 0, 0, 0, 0, false, false);
+    }
+
+    static final class MediaCandidate {
+        final int state;
+        final long position;
+        final long bufferedPosition;
+        final String packageName;
+        final boolean resumable;
+
+        MediaCandidate(int state, long position, long bufferedPosition, String packageName,
+                boolean resumable) {
+            this.state = state;
+            this.position = position;
+            this.bufferedPosition = bufferedPosition;
+            this.packageName = packageName;
+            this.resumable = resumable;
+        }
+    }
+
+    static int selectMediaCandidate(ArrayList<MediaCandidate> candidates) {
+        int firstResumable = -1;
+        int firstWeakPlaying = -1;
+        for (int i = 0; i < candidates.size(); i++) {
+            MediaCandidate candidate = candidates.get(i);
+            boolean playing = candidate.state == PlaybackState.STATE_PLAYING;
+            boolean hasProgress = candidate.position > 0 || candidate.bufferedPosition > 0;
+            if (playing && hasProgress) {
+                return i;
+            }
+            if (candidate.resumable && firstResumable < 0) {
+                firstResumable = i;
+            }
+            if (playing && !hasProgress && firstWeakPlaying < 0) {
+                firstWeakPlaying = i;
+            }
+        }
+        if (firstWeakPlaying >= 0) {
+            String weakPackage = candidates.get(firstWeakPlaying).packageName;
+            boolean packageHasBetter = false;
+            for (MediaCandidate candidate : candidates) {
+                if (samePackage(weakPackage, candidate.packageName)
+                        && ((candidate.state == PlaybackState.STATE_PLAYING
+                        && (candidate.position > 0 || candidate.bufferedPosition > 0))
+                        || candidate.resumable)) {
+                    packageHasBetter = true;
+                    break;
+                }
+            }
+            if (!packageHasBetter) {
+                return firstWeakPlaying;
+            }
+        }
+        if (firstResumable >= 0) {
+            return firstResumable;
+        }
+        return firstWeakPlaying;
+    }
+
+    private static boolean samePackage(String first, String second) {
+        return first == null ? second == null : first.equals(second);
     }
 
     private static MediaSnapshot snapshotOf(MediaController controller, PlaybackState state,
@@ -300,6 +373,16 @@ public final class WidgetData {
             PlaybackState state = controller.getPlaybackState();
             if (!supportsMediaAction(state, action)) {
                 return "Player does not support this control";
+            }
+            if ("com.quran.labs.androidquran".equals(controller.getPackageName())) {
+                // Quran's car session ignores transport controls from other apps; media keys work.
+                int key = MEDIA_PREVIOUS.equals(action) ? KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                        : MEDIA_NEXT.equals(action) ? KeyEvent.KEYCODE_MEDIA_NEXT
+                        : state.getState() == PlaybackState.STATE_PLAYING
+                        ? KeyEvent.KEYCODE_MEDIA_PAUSE : KeyEvent.KEYCODE_MEDIA_PLAY;
+                controller.dispatchMediaButtonEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+                controller.dispatchMediaButtonEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+                return null;
             }
             MediaController.TransportControls controls = controller.getTransportControls();
             switch (action) {

@@ -1668,12 +1668,14 @@ public final class BoardView extends View {
         if (media == null) {
             return null;
         }
+        if (media.isQuranSession && media.quran != null) {
+            return SurahArt.render(getContext(), media.quran.surah.number, size,
+                    colours.primaryContainer);
+        }
         if (media.art != null && !media.art.isRecycled()) {
             return media.art;
         }
-        return media.isQuranSession && media.quran != null
-                ? SurahArt.render(getContext(), media.quran.surah.number, size,
-                        colours.primaryContainer) : null;
+        return null;
     }
 
     private void drawLyricsArt(Canvas canvas, RectF bounds) {
