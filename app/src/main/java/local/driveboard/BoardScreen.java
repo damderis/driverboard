@@ -68,6 +68,8 @@ public final class BoardScreen extends Screen {
                     quranMetadataKey = metadataKey;
                     refreshNeeded = true;
                     drawBoard();
+                } else if (board.updateQuranPosition(media)) {
+                    drawBoard();
                 }
                 handler.postDelayed(this, 250);
                 return;
@@ -919,7 +921,6 @@ public final class BoardScreen extends Screen {
                 quranTrackKey = key;
                 quranLoading = false;
                 quranRetryAt = 0;
-                board.setQuran(null, edition);
             }
             if (!quranLoading && android.os.SystemClock.elapsedRealtime() >= quranRetryAt) {
                 quranLoading = true;

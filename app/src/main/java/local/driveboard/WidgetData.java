@@ -11,6 +11,8 @@ import android.media.session.MediaController;
 import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -42,7 +44,7 @@ public final class WidgetData {
     private static String cachedArtTrack = "";
     private static MediaSession.Token cachedArtSession;
     private static Bitmap cachedArt;
-    private static String loggedQuran = "";
+    private static String loggedQuranTrack = "";
 
     private WidgetData() {}
 
@@ -106,6 +108,7 @@ public final class WidgetData {
         public final boolean canNext;
         public final QuranMetadata quran;
         public final boolean isQuranSession;
+        public final int recitationId;
 
         public MediaSnapshot(String title, String artist, String album, Bitmap art, long duration,
                 long position, long updatedAt, float speed, boolean playing, boolean hasTrack) {
@@ -118,10 +121,19 @@ public final class WidgetData {
                 MediaController controller, PlaybackState playbackState) {
             String description = controller == null || controller.getMetadata() == null ? ""
                     : String.valueOf(controller.getMetadata().getDescription().getDescription());
+            MediaMetadata source = controller == null ? null : controller.getMetadata();
             isQuranSession = controller != null
                     && "com.quran.labs.androidquran".equals(controller.getPackageName());
             quran = QuranMetadata.parse(controller == null ? "" : controller.getPackageName(),
                     title, description);
+            recitationId = isQuranSession ? QuranPosition.recitationId(
+                    artist + " " + album + " " + title + " " + description + " "
+                            + (source == null ? "" : source.getString(
+                                    MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)) + " "
+                            + (source == null ? "" : source.getString(
+                                    MediaMetadata.METADATA_KEY_MEDIA_URI)) + " "
+                            + (source == null ? "" : source.getString(
+                                    MediaMetadata.METADATA_KEY_MEDIA_ID))) : 0;
             this.title = quran == null ? title : quran.heading();
             this.artist = artist;
             this.album = album;
@@ -214,17 +226,48 @@ public final class WidgetData {
                 artist, album, art, duration, state.getPosition(),
                 state.getLastPositionUpdateTime(), state.getPlaybackSpeed(), playing,
                 title != null && !title.trim().isEmpty(), controller, state);
-        if (snapshot.quran != null) {
-            String parsed = snapshot.quran.surah.number + ":" + snapshot.quran.ayah;
+        if (snapshot.isQuranSession) {
+            String track = controller.getSessionToken() + ":"
+                    + (snapshot.quran == null ? title : snapshot.quran.surah.number)
+                    + ":" + artist + ":" + album + ":" + duration;
             synchronized (WidgetData.class) {
-                if (!parsed.equals(loggedQuran)) {
-                    loggedQuran = parsed;
-                    CarDiagnostics.log(lc, "Quran parsed surah=" + snapshot.quran.surah.number
-                            + " ayah=" + snapshot.quran.ayah);
+                if (!track.equals(loggedQuranTrack)) {
+                    loggedQuranTrack = track;
+                    logQuranMetadata(lc, data, snapshot);
                 }
             }
         }
         return snapshot;
+    }
+
+    private static void logQuranMetadata(Context context, MediaMetadata data,
+            MediaSnapshot snapshot) {
+        ArrayList<String> keys = new ArrayList<>(data.keySet());
+        Collections.sort(keys);
+        StringBuilder details = new StringBuilder("Quran metadata session=")
+                .append(snapshot.controller.getSessionToken())
+                .append(" surah=").append(snapshot.quran == null ? 0 : snapshot.quran.surah.number)
+                .append(" ayah=").append(snapshot.quran == null ? 0 : snapshot.quran.ayah)
+                .append(" recitation=").append(snapshot.recitationId);
+        for (String key : keys) {
+            String value;
+            try {
+                if (MediaMetadata.METADATA_KEY_ART.equals(key)
+                        || MediaMetadata.METADATA_KEY_ALBUM_ART.equals(key)
+                        || MediaMetadata.METADATA_KEY_DISPLAY_ICON.equals(key)) {
+                    value = "[artwork]";
+                } else {
+                    CharSequence text = data.getText(key);
+                    value = text == null ? String.valueOf(data.getLong(key)) : text.toString();
+                }
+            } catch (RuntimeException error) {
+                value = "[" + error.getClass().getSimpleName() + "]";
+            }
+            details.append(" ").append(key).append("=")
+                    .append(value.replaceAll("[\\p{Cntrl}]", " ").substring(0,
+                            Math.min(160, value.length())));
+        }
+        CarDiagnostics.log(context, details.toString());
     }
 
     /** Whether the session advertises the requested control in its current playback state. */

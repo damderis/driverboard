@@ -103,11 +103,20 @@ public final class BoardView extends View {
     private QuranMetadata displayedQuran;
     private QuranMetadata outgoingQuran;
     private long quranTransitionAt;
+    private boolean quranApproximate;
+    private QuranTimingRepository.Timing quranTiming;
+    private String quranTimingKey = "";
+    private boolean quranTimingLoading;
+    private long quranTimingRetryAt;
+    private String quranDocumentKey = "";
+    private boolean quranDocumentLoading;
+    private long quranDocumentRetryAt;
+    private String[] quranVerses;
     private Typeface quranTypeface;
     private final Map<String, StaticLayout> quranLayouts = new HashMap<>();
 
     public boolean isQuranTransitioning() {
-        return lyricsVisible && media != null && media.quran != null
+        return lyricsVisible && media != null && displayedQuran != null
                 && outgoingQuran != null
                 && SystemClock.uptimeMillis() - quranTransitionAt < 320;
     }
@@ -256,7 +265,57 @@ public final class BoardView extends View {
         }
         quranDocument = document;
         quranEdition = edition;
+        quranVerses = null;
+        QuranCatalog.Entry surah = document == null ? null : QuranCatalog.get(document.surah);
+        if (surah != null) {
+            quranVerses = new String[surah.ayahCount + 1];
+            for (int i = 1; i < quranVerses.length; i++) {
+                quranVerses[i] = document.arabic(i);
+            }
+        }
+        updateQuranPosition(media);
         invalidateStatic();
+    }
+
+    /** Return true when the visible ayah changed, so the car surface can draw a transition. */
+    public boolean updateQuranPosition(WidgetData.MediaSnapshot snapshot) {
+        QuranMetadata source = snapshot == null ? null : snapshot.quran;
+        int metadataAyah = source == null ? 0 : source.ayah;
+        int timedAyah = 0;
+        int estimatedAyah = 0;
+        if (source != null && metadataAyah == 0 && snapshot.position >= 0) {
+            long position = snapshot.estimatedPositionMs();
+            if (quranTiming != null) {
+                timedAyah = quranTiming.ayahAt(position);
+            }
+            if (quranTiming == null && quranVerses != null && quranDocument != null
+                    && quranDocument.surah == source.surah.number && snapshot.duration > 0) {
+                estimatedAyah = QuranPosition.estimate(quranVerses, position, snapshot.duration);
+            }
+        }
+        int ayah = QuranPosition.resolve(metadataAyah, quranTiming != null,
+                timedAyah, estimatedAyah);
+        boolean approximate = QuranPosition.isApproximate(metadataAyah,
+                quranTiming != null, estimatedAyah);
+        QuranMetadata next = source == null ? null : source.withAyah(ayah);
+        if (next == null || displayedQuran == null
+                || next.surah.number != displayedQuran.surah.number
+                || next.ayah != displayedQuran.ayah) {
+            outgoingQuran = next != null && displayedQuran != null
+                    && next.surah.number == displayedQuran.surah.number
+                    ? displayedQuran : null;
+            displayedQuran = next;
+            quranTransitionAt = SystemClock.uptimeMillis();
+            quranApproximate = approximate;
+            invalidateStatic();
+            scheduleFrame();
+            return true;
+        }
+        if (quranApproximate != approximate) {
+            quranApproximate = approximate;
+            invalidateStatic();
+        }
+        return false;
     }
 
     public boolean isMediaPlaying() {
@@ -628,16 +687,8 @@ public final class BoardView extends View {
         prayer = WidgetData.prayerSnapshot(words);
         weather = WeatherRepository.snapshot(words);
         media = WidgetData.mediaSnapshot(words);
-        QuranMetadata nextQuran = media.quran;
-        if (nextQuran == null || displayedQuran == null
-                || nextQuran.surah.number != displayedQuran.surah.number
-                || nextQuran.ayah != displayedQuran.ayah) {
-            outgoingQuran = nextQuran != null && displayedQuran != null
-                    && nextQuran.surah.number == displayedQuran.surah.number
-                    ? displayedQuran : null;
-            displayedQuran = nextQuran;
-            quranTransitionAt = SystemClock.uptimeMillis();
-        }
+        requestQuranPositionData();
+        updateQuranPosition(media);
         if (lyrics != null && !lyrics.isTimed()) {
             long oldDuration = displayLyrics == null || displayLyrics.lines.length == 0 ? 0
                     : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs;
@@ -653,6 +704,61 @@ public final class BoardView extends View {
         clearLyricBlocks();
         invalidateStatic();
         scheduleFrame();
+    }
+
+    private void requestQuranPositionData() {
+        QuranMetadata source = media.quran;
+        if (source == null) {
+            quranTimingKey = "";
+            quranTiming = null;
+            quranTimingLoading = false;
+            quranDocumentKey = "";
+            quranDocumentLoading = false;
+            return;
+        }
+        int surah = source.surah.number;
+        String documentKey = String.valueOf(surah);
+        if (!documentKey.equals(quranDocumentKey)) {
+            quranDocumentKey = documentKey;
+            quranDocumentLoading = false;
+            quranDocumentRetryAt = 0;
+            if (quranDocument == null || quranDocument.surah != surah) {
+                setQuran(null, quranEdition);
+            }
+        }
+        if (quranDocument == null && !quranDocumentLoading
+                && SystemClock.elapsedRealtime() >= quranDocumentRetryAt) {
+            quranDocumentLoading = true;
+            QuranRepository.request(getContext(), surah, result -> {
+                if (!documentKey.equals(quranDocumentKey)) return;
+                quranDocumentLoading = false;
+                quranDocumentRetryAt = result == null
+                        ? SystemClock.elapsedRealtime() + 30_000 : Long.MAX_VALUE;
+                if (result != null) {
+                    setQuran(result, quranEdition);
+                    if (frameRequestHook != null) frameRequestHook.run();
+                }
+            });
+        }
+        String timingKey = surah + ":" + media.recitationId;
+        if (!timingKey.equals(quranTimingKey)) {
+            quranTimingKey = timingKey;
+            quranTiming = null;
+            quranTimingLoading = false;
+            quranTimingRetryAt = 0;
+        }
+        if (media.recitationId == 0 || quranTiming != null || quranTimingLoading
+                || SystemClock.elapsedRealtime() < quranTimingRetryAt) return;
+        quranTimingLoading = true;
+        QuranTimingRepository.request(getContext(), media.recitationId, surah, result -> {
+            if (!timingKey.equals(quranTimingKey)) return;
+            quranTimingLoading = false;
+            quranTiming = result;
+            quranTimingRetryAt = result == null
+                    ? SystemClock.elapsedRealtime() + 30_000 : Long.MAX_VALUE;
+            updateQuranPosition(media);
+            if (frameRequestHook != null) frameRequestHook.run();
+        });
     }
 
     private float unit() {
@@ -1298,6 +1404,12 @@ public final class BoardView extends View {
                 text(canvas, media.artist, content.left,
                         titleY + titleSize * 1.2f, titleSize * .72f,
                         SAGE, Fonts.regular(getContext()), leftWidth);
+                if (displayedQuran != null && quranApproximate) {
+                    String label = "ms".equals(AppLocale.locale(getContext()).getLanguage())
+                            ? "Anggaran" : "Approximate";
+                    text(canvas, label, content.left, titleY + titleSize * 2.05f,
+                            titleSize * .55f, SAGE, Fonts.regular(getContext()), leftWidth);
+                }
             }
         }
         float lyricLeft = content.left + leftWidth
@@ -1433,7 +1545,7 @@ public final class BoardView extends View {
     }
 
     private void drawQuran(Canvas canvas, RectF area) {
-        QuranMetadata current = media.quran;
+        QuranMetadata current = displayedQuran;
         if (current == null) {
             drawQuranText(canvas, DASH, area, Math.min(30f * unit(), area.height() * .2f),
                     colours.onSurface, false, 1);
@@ -1996,7 +2108,8 @@ public final class BoardView extends View {
         }
         float x = artwork.right + 10f * unit();
         float width = Math.max(1f, r.right - x);
-        String title = media == null || media.title == null ? DASH : media.title;
+        String title = media == null || media.title == null ? DASH
+                : displayedQuran == null ? media.title : displayedQuran.heading();
         String artist = media == null || media.artist == null ? "" : media.artist;
         boolean playing = media != null && media.playing;
         boolean empty = media == null || media.controller == null;
@@ -2041,6 +2154,15 @@ public final class BoardView extends View {
         if (!artist.isEmpty() && artistY >= r.top + artistSize) {
             text(canvas, artist, x, artistY, artistSize, SAGE,
                     Fonts.regular(getContext()), width);
+        }
+        if (displayedQuran != null && quranApproximate) {
+            float labelY = artistY + artistSize * 1.15f;
+            if (labelY < controls.playPause.top - 3f * unit()) {
+                String label = "ms".equals(AppLocale.locale(getContext()).getLanguage())
+                        ? "Anggaran" : "Approximate";
+                text(canvas, label, x, labelY, artistSize * .72f, SAGE,
+                        Fonts.regular(getContext()), width);
+            }
         }
     }
 

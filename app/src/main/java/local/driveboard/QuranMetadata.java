@@ -18,6 +18,11 @@ public final class QuranMetadata {
         this.ayah = ayah;
     }
 
+    /** Retain the identified surah while resolving a missing ayah from playback position. */
+    public QuranMetadata withAyah(int ayah) {
+        return new QuranMetadata(surah, ayah >= 1 && ayah <= surah.ayahCount ? ayah : 0);
+    }
+
     public static QuranMetadata parse(String packageName, String title, String description) {
         if (!PACKAGE.equals(packageName)) return null;
         QuranCatalog.Entry fromTitle = QuranCatalog.match(chapterPart(title));
