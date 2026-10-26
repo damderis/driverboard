@@ -6,6 +6,7 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 dependencies {
+    implementation 'androidx.media3:media3-session:1.11.1'
     implementation 'androidx.car.app:app:1.7.0'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.graphics:graphics-shapes:1.1.0'

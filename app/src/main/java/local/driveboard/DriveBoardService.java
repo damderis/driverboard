@@ -36,6 +36,7 @@ public final class DriveBoardService extends CarAppService {
     @Override
     public Session onCreateSession() {
         CarDiagnostics.log(this, "Session create");
+        RoutinePlayer.get(this).onCarStarted();
         return new Session() {
             private BoardScreen boardScreen;
             {

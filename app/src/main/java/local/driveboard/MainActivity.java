@@ -198,6 +198,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addBackgroundRow(card);
         addColoursRow(card);
         addLanguageRow(card);
+        new RoutineSettings(this).attach(content);
         addFooter(content);
 
         setContentView(scroll);

@@ -1,0 +1,25 @@
+<resources>
+    <string name="routine_title">Quran routines</string>
+    <string name="routine_help">Starts 8 seconds after the car connects. Times use your local clock.</string>
+    <string name="routine_morning">Morning routine</string>
+    <string name="routine_friday">Friday evening</string>
+    <string name="routine_add">Add routine</string>
+    <string name="routine_new">New routine</string>
+    <string name="routine_rename">Edit name</string>
+    <string name="routine_enabled">Enable %1$s</string>
+    <string name="routine_start">Start time</string>
+    <string name="routine_end">End time</string>
+    <string name="routine_start_value">Start: %1$s</string>
+    <string name="routine_end_value">End: %1$s</string>
+    <string name="routine_surahs">Surahs in playback order</string>
+    <string name="routine_remove">Remove</string>
+    <string name="routine_remove_surah">Remove %1$s</string>
+    <string name="routine_add_surah">Add surah</string>
+    <string name="routine_reciter">Reciter</string>
+    <string name="routine_reciter_value">Reciter: %1$s</string>
+    <string name="routine_play">Play now</string>
+    <string name="routine_delete">Delete routine</string>
+    <string name="routine_search">Search by number or name</string>
+    <string name="routine_time_invalid">End time must be at or after start time.</string>
+    <string-array name="routine_days"><item>Mon</item><item>Tue</item><item>Wed</item><item>Thu</item><item>Fri</item><item>Sat</item><item>Sun</item></string-array>
+</resources>

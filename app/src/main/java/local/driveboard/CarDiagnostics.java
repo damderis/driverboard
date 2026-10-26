@@ -3,6 +3,8 @@ package local.driveboard;
 import android.app.Application;
 import android.content.Context;
 
+import androidx.car.app.connection.CarConnection;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintWriter;
@@ -16,6 +18,7 @@ import java.util.Locale;
 public final class CarDiagnostics extends Application {
     private static final Object LOCK = new Object();
     private static boolean installed;
+    private int carConnectionType = CarConnection.CONNECTION_TYPE_NOT_CONNECTED;
 
     @Override
     public void onCreate() {
@@ -23,6 +26,20 @@ public final class CarDiagnostics extends Application {
         Store.prefs(this).edit().remove("battery_pct").remove("range_m")
                 .remove("battery_at").remove("battery_reason").remove("battery_unsupported").apply();
         install(this);
+        // The notification-listener binding normally keeps this process alive between car starts.
+        new CarConnection(this).getType().observeForever(type -> {
+            if (type == null) {
+                return;
+            }
+            int previous = carConnectionType;
+            carConnectionType = type;
+            if (type == CarConnection.CONNECTION_TYPE_PROJECTION && type != previous) {
+                RoutinePlayer.get(this).onCarStarted();
+            } else if (previous == CarConnection.CONNECTION_TYPE_PROJECTION
+                    && type != previous) {
+                RoutinePlayer.get(this).onCarDisconnected();
+            }
+        });
     }
 
     public static void install(Context context) {
