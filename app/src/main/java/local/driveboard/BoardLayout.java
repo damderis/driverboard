@@ -1,24 +1,41 @@
 package local.driveboard;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
-/** Pure Java grid and version-one JSON codec; no Android runtime needed. */
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/** Grid placement and the versioned board layout codec. */
 public final class BoardLayout {
     public static final int COLS = 12;
     public static final int ROWS = 6;
-    public static final String[] TYPES = {"clock", "prayer", "media", "weather"};
     public static final class Card {
+        public final String id;
         public final String type;
         public int col;
         public int row;
         public int w;
         public int h;
+        public final Map<String, String> options;
 
         public Card(String type, int col, int row, int w, int h) {
-            this.type = type;
+            this(type, type + "-1", col, row, w, h, null);
+        }
+
+        public Card(String type, String id, int col, int row, int w, int h,
+                Map<String, String> options) {
+            WidgetType widget = WidgetType.fromId(type);
+            if (widget == null) throw new IllegalArgumentException("Unknown widget: " + type);
+            this.type = widget.id;
+            this.id = id;
+            this.options = widget.normalizeOptions(options);
             this.w = clamp(w, 1, COLS);
             this.h = clamp(h, 1, ROWS);
             this.col = clamp(col, 0, COLS - this.w);
@@ -27,6 +44,113 @@ public final class BoardLayout {
     }
 
     public final List<Card> cards = new ArrayList<>();
+
+    public BoardLayout copy() {
+        BoardLayout copy = new BoardLayout();
+        for (Card c : cards) {
+            copy.cards.add(new Card(c.type, c.id, c.col, c.row, c.w, c.h, c.options));
+        }
+        return copy;
+    }
+
+    public boolean remove(Card card) {
+        return cards.remove(card);
+    }
+
+    public Card add(String type) {
+        WidgetType widget = WidgetType.fromId(type);
+        if (widget == null || (!widget.multiple && containsType(widget.id))) return null;
+        for (int area = widget.defaultW * widget.defaultH;
+                area >= widget.minW * widget.minH; area--) {
+            for (int h = widget.defaultH; h >= widget.minH; h--) {
+                for (int w = widget.defaultW; w >= widget.minW; w--) {
+                    if (w * h != area) continue;
+                    for (int row = 0; row <= ROWS - h; row++) {
+                        for (int col = 0; col <= COLS - w; col++) {
+                            if (!canPlace(null, col, row, w, h)) continue;
+                            Card card = new Card(widget.id, nextId(widget.id), col, row,
+                                    w, h, null);
+                            cards.add(card);
+                            return card;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public Card add(String type, int col, int row) {
+        WidgetType widget = WidgetType.fromId(type);
+        if (widget == null || (!widget.multiple && containsType(widget.id))) return null;
+        if (!canPlace(null, col, row, widget.defaultW, widget.defaultH)) return null;
+        Card card = new Card(widget.id, nextId(widget.id), col, row,
+                widget.defaultW, widget.defaultH, null);
+        cards.add(card);
+        return card;
+    }
+
+    public Card duplicate(Card source) {
+        if (source == null || !cards.contains(source)) return null;
+        WidgetType widget = WidgetType.fromId(source.type);
+        if (widget == null || !widget.multiple) return null;
+        int width = Math.max(widget.minW, source.w);
+        int height = Math.max(widget.minH, source.h);
+        for (int distance = 0; distance <= COLS + ROWS; distance++) {
+            for (int row = 0; row <= ROWS - height; row++) {
+                for (int col = 0; col <= COLS - width; col++) {
+                    if (Math.abs(col - source.col) + Math.abs(row - source.row) != distance
+                            || !canPlace(null, col, row, width, height)) continue;
+                    Card card = new Card(source.type, nextId(source.type), col, row,
+                            width, height, source.options);
+                    cards.add(card);
+                    return card;
+                }
+            }
+        }
+        return null;
+    }
+
+    public boolean canPlace(Card moving, int col, int row, int w, int h) {
+        if (col < 0 || row < 0 || w < 1 || h < 1 || col + w > COLS || row + h > ROWS)
+            return false;
+        for (Card card : cards) {
+            if (card != moving && col < card.col + card.w && card.col < col + w
+                    && row < card.row + card.h && card.row < row + h) return false;
+        }
+        return true;
+    }
+
+    public boolean tryMove(Card c, int col, int row) {
+        if (!cards.contains(c)) return false;
+        col = clamp(col, 0, COLS - c.w);
+        row = clamp(row, 0, ROWS - c.h);
+        if (!canPlace(c, col, row, c.w, c.h)) return false;
+        c.col = col;
+        c.row = row;
+        return true;
+    }
+
+    public boolean tryResize(Card c, int w, int h) {
+        if (!cards.contains(c)) return false;
+        WidgetType widget = WidgetType.fromId(c.type);
+        if (COLS - c.col < widget.minW || ROWS - c.row < widget.minH) return false;
+        w = clamp(w, widget.minW, COLS - c.col);
+        h = clamp(h, widget.minH, ROWS - c.row);
+        if (!canPlace(c, c.col, c.row, w, h)) return false;
+        c.w = w;
+        c.h = h;
+        return true;
+    }
+
+    private boolean containsType(String type) {
+        for (Card card : cards) if (card.type.equals(type)) return true;
+        return false;
+    }
+
+    private String nextId(String type) {
+        return type + "-" + UUID.randomUUID();
+    }
 
     public static int clamp(int n, int min, int max) {
         return Math.max(min, Math.min(max, n));
@@ -37,13 +161,11 @@ public final class BoardLayout {
     }
 
     public void move(Card c, int col, int row) {
-        c.col = clamp(col, 0, COLS - c.w);
-        c.row = clamp(row, 0, ROWS - c.h);
+        tryMove(c, col, row);
     }
 
     public void resize(Card c, int w, int h) {
-        c.w = clamp(w, 1, COLS - c.col);
-        c.h = clamp(h, 1, ROWS - c.row);
+        tryResize(c, w, h);
     }
 
     public static BoardLayout defaults() {
@@ -75,15 +197,25 @@ public final class BoardLayout {
 
     // Full-width clock and weather keep the vertical panel easy to read.
     public static BoardLayout narrowDefaults(boolean playing, BoardLayout split) {
-        boolean hasMedia = false;
-        for (Card card : split.cards) {
-            hasMedia |= "media".equals(card.type);
-        }
+        Card prayer = findType(split, "prayer");
+        Card clock = findType(split, "clock");
+        Card media = findType(split, "media");
+        Card weather = findType(split, "weather");
         BoardLayout b = new BoardLayout();
-        b.cards.add(new Card("prayer", 0, 0, 12, 3));
-        b.cards.add(new Card("clock", 0, 3, 12, 2));
-        b.cards.add(new Card(playing && hasMedia ? "media" : "weather", 0, 5, 12, 1));
+        if (prayer != null) b.cards.add(derived(prayer, 0, 0, 12, 3));
+        if (clock != null) b.cards.add(derived(clock, 0, 3, 12, 2));
+        Card bottom = playing && media != null ? media : weather != null ? weather : media;
+        if (bottom != null) b.cards.add(derived(bottom, 0, 5, 12, 1));
         return b;
+    }
+
+    private static Card findType(BoardLayout layout, String type) {
+        for (Card card : layout.cards) if (type.equals(card.type)) return card;
+        return null;
+    }
+
+    private static Card derived(Card source, int col, int row, int w, int h) {
+        return new Card(source.type, source.id, col, row, w, h, source.options);
     }
 
     public static BoardLayout splitDefaults() {
@@ -95,19 +227,24 @@ public final class BoardLayout {
     }
 
     public String toJson() {
-        StringBuilder s = new StringBuilder("[");
+        StringBuilder s = new StringBuilder("{\"version\":2,\"cards\":[");
         for (Card c : cards) {
-            if (s.length() > 1) {
-                s.append(',');
-            }
-            s.append("{\"type\":\"").append(c.type).append("\",\"col\":").append(c.col)
+            if (s.charAt(s.length() - 1) != '[') s.append(',');
+            s.append("{\"id\":").append(JSONObject.quote(c.id))
+                    .append(",\"type\":").append(JSONObject.quote(c.type))
+                    .append(",\"col\":").append(c.col)
                     .append(",\"row\":").append(c.row).append(",\"w\":").append(c.w)
-                    .append(",\"h\":").append(c.h).append('}');
+                    .append(",\"h\":").append(c.h).append(",\"options\":{");
+            for (Map.Entry<String, String> option : c.options.entrySet()) {
+                if (s.charAt(s.length() - 1) != '{') s.append(',');
+                s.append(JSONObject.quote(option.getKey())).append(':')
+                        .append(JSONObject.quote(option.getValue()));
+            }
+            s.append("}}");
         }
-        return s.append(']').toString();
+        return s.append("]}").toString();
     }
 
-    // Fixed schema written by this app, deliberately independent of org.json on Android.
     public static BoardLayout fromJson(String json) {
         return fromJson(json, false);
     }
@@ -117,27 +254,64 @@ public final class BoardLayout {
     }
 
     public static BoardLayout fromJson(String json, boolean split) {
-        if (json == null) {
-            return split ? splitDefaults() : defaults();
-        }
-        Pattern p = Pattern.compile("\\{\\s*\"type\"\\s*:\\s*\"(clock|prayer|media|weather|battery)\"\\s*,\\s*\"col\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"row\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"w\"\\s*:\\s*(-?\\d+)\\s*,\\s*\"h\"\\s*:\\s*(-?\\d+)\\s*\\}");
-        BoardLayout b = new BoardLayout();
-        Matcher m = p.matcher(json);
         try {
-            while (m.find()) {
-                String type = "battery".equals(m.group(1)) ? "weather" : m.group(1);
-                for (Card c : b.cards) {
-                    if (c.type.equals(type)) {
-                        return split ? splitDefaults() : defaults();
-                    }
-                }
-                b.cards.add(new Card(type, Integer.parseInt(m.group(2)),
-                        Integer.parseInt(m.group(3)), Integer.parseInt(m.group(4)),
-                        Integer.parseInt(m.group(5))));
-            }
-        } catch (RuntimeException e) {
-            return split ? splitDefaults() : defaults();
+            if (json == null) return fallback(split);
+            String trimmed = json.trim();
+            if (trimmed.startsWith("{")) return parseV2(new JSONObject(trimmed));
+            return migrateV1(new JSONArray(trimmed), split);
+        } catch (JSONException | IllegalArgumentException e) {
+            return fallback(split);
         }
+    }
+
+    private static BoardLayout parseV2(JSONObject root) throws JSONException {
+        if (root.getInt("version") != 2) throw new JSONException("Unsupported layout version");
+        JSONArray source = root.getJSONArray("cards");
+        BoardLayout b = new BoardLayout();
+        Set<String> ids = new HashSet<>();
+        for (int i = 0; i < source.length(); i++) {
+            JSONObject item = source.getJSONObject(i);
+            String type = item.getString("type");
+            WidgetType widget = WidgetType.fromId(type);
+            if (widget == null || (!widget.multiple && b.containsType(widget.id))) continue;
+            String id = item.getString("id");
+            if (id.isEmpty() || !ids.add(id)) throw new JSONException("Duplicate widget ID");
+            int col = item.getInt("col");
+            int row = item.getInt("row");
+            int w = item.getInt("w");
+            int h = item.getInt("h");
+            // Old layouts can contain small or overlapping cards. Keep them intact
+            // across the first v2 save; new editor actions enforce catalog minima.
+            if (col < 0 || row < 0 || w < 1 || h < 1
+                    || col + w > COLS || row + h > ROWS)
+                throw new JSONException("Invalid widget placement");
+            Map<String, String> options = new LinkedHashMap<>();
+            JSONObject supplied = item.optJSONObject("options");
+            if (supplied != null) {
+                for (String key : widget.options.keySet()) {
+                    if (supplied.has(key)) options.put(key, supplied.optString(key));
+                }
+            }
+            b.cards.add(new Card(widget.id, id, col, row, w, h, options));
+        }
+        return b;
+    }
+
+    private static BoardLayout migrateV1(JSONArray source, boolean split) throws JSONException {
+        BoardLayout b = new BoardLayout();
+        boolean sawUnknown = false;
+        for (int i = 0; i < source.length(); i++) {
+            JSONObject item = source.getJSONObject(i);
+            WidgetType widget = WidgetType.fromId(item.getString("type"));
+            if (widget == null) {
+                sawUnknown = true;
+                continue;
+            }
+            if (b.containsType(widget.id)) return fallback(split);
+            b.cards.add(new Card(widget.id, widget.id + "-1", item.getInt("col"),
+                    item.getInt("row"), item.getInt("w"), item.getInt("h"), null));
+        }
+        if (sawUnknown) return b.cards.isEmpty() ? fallback(split) : b;
         if (split) {
             boolean prayer = false;
             boolean clock = false;
@@ -194,6 +368,10 @@ public final class BoardLayout {
         }
         b.cards.add(best);
         return b;
+    }
+
+    private static BoardLayout fallback(boolean split) {
+        return split ? splitDefaults() : defaults();
     }
     private static boolean isOldDefault(BoardLayout b) {
         for (Card c : b.cards) {

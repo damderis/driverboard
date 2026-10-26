@@ -54,7 +54,10 @@ public final class QariCatalog {
         public Entry(int id, String name, int status) {
             this.id = id;
             this.name = name;
-            this.status = status;
+            // Quran doesn't expose stream URIs; it labels per-ayah-only reciters "(gapped)" itself.
+            this.status = status == UNKNOWN && name != null
+                    && name.toLowerCase(java.util.Locale.ROOT).contains("(gapped)")
+                    ? UNPLAYABLE : status;
         }
     }
 

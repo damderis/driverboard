@@ -71,6 +71,7 @@ public final class BoardView extends View {
                 }
             };
     private String time = DASH;
+    private String clockDisplayTime;
     private String date = DASH;
     private Bitmap background;
     private Bitmap glassBackdrop;
@@ -83,6 +84,23 @@ public final class BoardView extends View {
     private BoardColours colours;
     private Context words;
     private boolean editing;
+    private BoardLayout.Card selectedCard;
+    private BoardLayout.Card renderingCard;
+    private java.util.function.Consumer<BoardLayout.Card> selectionListener;
+    private Runnable editStartListener;
+    private boolean editorLayout;
+    private boolean editorTap;
+    public boolean isEditorTap() { return editorTap; }
+    public BoardLayout getBoardLayout() { return layout; }
+    public void setEditorLayout(BoardLayout value) {
+        editorLayout = true; layout = value;
+        if (!layout.cards.contains(selectedCard)) { selectedCard = null; }
+        cancelLayoutTransition(); invalidateStatic();
+    }
+    public void setSelectionListener(java.util.function.Consumer<BoardLayout.Card> listener) { selectionListener = listener; }
+    public void setEditStartListener(Runnable listener) { editStartListener = listener; }
+    public void selectCard(BoardLayout.Card card) { selectedCard = card; invalidateStatic(); }
+    private boolean option(BoardLayout.Card card, String key) { return card == null || !"false".equals(card.options.get(key)); }
     private boolean carNight;
     private boolean resizing;
     private BoardLayout.Card dragging;
@@ -485,7 +503,7 @@ public final class BoardView extends View {
             return lyricsControlLayout();
         }
         BoardLayout.Card card = findCard("media");
-        return card == null ? null : mediaControlLayout(mediaContent(visualBounds(card)));
+        return card == null || !option(card, "show_controls") ? null : mediaControlLayout(mediaContent(visualBounds(card)));
     }
 
     private void drawMediaControls(Canvas canvas) {
@@ -516,7 +534,7 @@ public final class BoardView extends View {
         if (!lyricsVisible) {
             BoardLayout.Card card = findCard("media");
             RectF bounds = visualBounds(card);
-            float alpha = transitionAlpha(card.type, SystemClock.uptimeMillis());
+            float alpha = transitionAlpha(card.id, SystemClock.uptimeMillis());
             canvas.saveLayerAlpha(bounds, Math.round(alpha * 255f));
             canvas.clipPath(cardPath(card.type, bounds));
         }
@@ -677,7 +695,7 @@ public final class BoardView extends View {
     }
 
     public void refresh() {
-        if (dragging == null) {
+        if (dragging == null && !editorLayout) {
             layout = Store.layout(getContext(), mode);
         }
         words = AppLocale.wrap(getContext());
@@ -804,10 +822,10 @@ public final class BoardView extends View {
                 : BoardTransition.progress(now - transitionStartedAt);
         for (BoardLayout.Card card : layout.cards) {
             RectF visible = captureBounds(card, oldWidth, oldHeight, now);
-            positions.put(card.type, new BoardTransition.Rect(visible.left + frameX,
+            positions.put(card.id, new BoardTransition.Rect(visible.left + frameX,
                     visible.top + frameY, visible.right + frameX, visible.bottom + frameY));
-            Float previousAlpha = transitionStartAlpha.get(card.type);
-            alphas.put(card.type, !isTransitioning() ? 1f
+            Float previousAlpha = transitionStartAlpha.get(card.id);
+            alphas.put(card.id, !isTransitioning() ? 1f
                     : previousAlpha == null ? BoardTransition.incomingAlpha(previousProgress)
                     : previousAlpha + (1f - previousAlpha) * previousProgress);
             Bitmap bitmap = null;
@@ -815,7 +833,7 @@ public final class BoardView extends View {
                 bitmap = renderCardBitmap(card, visible);
             }
             if (bitmap == null) {
-                bitmap = transitionSource.get(card.type);
+                bitmap = transitionSource.get(card.id);
             }
             if (bitmap == null && staticLayer != null && !staticLayer.isRecycled()) {
                 RectF old = bounds(card, oldWidth, oldHeight);
@@ -826,7 +844,7 @@ public final class BoardView extends View {
                 bitmap = Bitmap.createBitmap(staticLayer, left, top, right - left, bottom - top);
             }
             if (bitmap != null) {
-                sources.put(card.type, bitmap);
+                sources.put(card.id, bitmap);
             }
         }
         for (Map.Entry<String, BoardTransition.Rect> entry : transitionFrom.entrySet()) {
@@ -896,7 +914,7 @@ public final class BoardView extends View {
         }
         float progress = transitionPending ? 0f
                 : BoardTransition.progress(now - transitionStartedAt);
-        BoardTransition.Rect from = transitionFrom.get(card.type);
+        BoardTransition.Rect from = transitionFrom.get(card.id);
         if (from == null) {
             BoardTransition.Rect scaled = new BoardTransition.Rect(target.left, target.top,
                     target.right, target.bottom).scale(.92f + .08f * progress);
@@ -911,7 +929,7 @@ public final class BoardView extends View {
 
     private RectF visualBounds(BoardLayout.Card card, long now) {
         RectF target = bounds(card);
-        BoardTransition.Rect from = transitionFrom.get(card.type);
+        BoardTransition.Rect from = transitionFrom.get(card.id);
         if (!isTransitioning()) {
             return target;
         }
@@ -1025,9 +1043,6 @@ public final class BoardView extends View {
             drawLyrics(canvas, true);
             return;
         }
-        if (editing) {
-            drawGrid(canvas);
-        }
         for (BoardLayout.Card c : layout.cards) {
             RectF r = bounds(c);
             if (r.width() <= 0 || r.height() <= 0) {
@@ -1035,45 +1050,44 @@ public final class BoardView extends View {
             }
             drawCard(canvas, c, r);
         }
+        if (editing) { drawGrid(canvas); }
     }
 
     private void drawCard(Canvas canvas, BoardLayout.Card c, RectF r) {
         canvas.save();
-        renderingCardType = c.type;
+        renderingCardType = c.id;
+        renderingCard = c;
         drawCardSurface(canvas, c.type, r);
         canvas.clipPath(cardPath(c.type, r));
         float pad = Math.max(4.5f * unit(),
                 Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
-        if ("media".equals(c.type)) {
+        if (WidgetType.fromId(c.type).padding == WidgetType.Padding.MEDIA) {
             pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
-        } else if ("prayer".equals(c.type)) {
+        } else if (WidgetType.fromId(c.type).padding == WidgetType.Padding.PRAYER) {
             float radius = BoardLayout.prayerRadius(r.width(), r.height());
             pad = Math.min(Math.min(r.width(), r.height()) * .28f,
                     Math.max(3f * unit(), radius * .40f));
         }
         RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
-        if ("clock".equals(c.type)) {
-            drawClock(canvas, content);
-        } else if ("prayer".equals(c.type)) {
-            drawPrayer(canvas, content);
-        } else if ("media".equals(c.type)) {
-            drawMedia(canvas, content);
-        } else if ("weather".equals(c.type)) {
+        if (WidgetType.fromId(c.type) == WidgetType.WEATHER) {
             float aspect = r.width() / r.height();
             if (aspect > .75f && aspect < 1.4f) {
-                // Keep text inside the circle's inscribed square, with padding.
-                float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8);
-                half *= .90f;
-                content = new RectF(r.centerX() - half, r.centerY() - half,
-                        r.centerX() + half, r.centerY() + half);
+                float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8) * .90f;
+                content = new RectF(r.centerX() - half, r.centerY() - half, r.centerX() + half, r.centerY() + half);
             }
-            drawWeather(canvas, content);
         }
+        WidgetType.fromId(c.type).drawer.draw(this, canvas, content);
         if (editing) {
             drawHandle(canvas, r);
+            if (selectedCard == c) {
+                paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(Math.max(2f, 2f * unit()));
+                paint.setColor(BRASS); canvas.drawRoundRect(r, 8f * unit(), 8f * unit(), paint);
+                paint.setStyle(Paint.Style.FILL);
+            }
         }
         canvas.restore();
         renderingCardType = null;
+        renderingCard = null;
     }
 
     private void drawTransition(Canvas canvas, long now) {
@@ -1107,7 +1121,7 @@ public final class BoardView extends View {
             drawFrameBackground(canvas, frame());
         }
         for (Map.Entry<String, BoardTransition.Rect> entry : transitionFrom.entrySet()) {
-            if (findCard(entry.getKey()) != null) {
+            if (layout.cards.stream().anyMatch(card -> card.id.equals(entry.getKey()))) {
                 continue;
             }
             Bitmap bitmap = transitionSource.get(entry.getKey());
@@ -1123,7 +1137,7 @@ public final class BoardView extends View {
         }
         for (BoardLayout.Card card : layout.cards) {
             RectF current = visualBounds(card, now);
-            float alpha = transitionAlpha(card.type, now);
+            float alpha = transitionAlpha(card.id, now);
             if (alpha > 0f && current.width() > 0f && current.height() > 0f) {
                 int save = canvas.save();
                 if (alpha < 1f) {
@@ -1164,7 +1178,7 @@ public final class BoardView extends View {
             return;
         }
         int save = canvas.save();
-        canvas.clipPath(cardPath(type, rect));
+        // The captured bitmap already contains the instance shape.
         paint.setShader(null);
         paint.setColor(0xFFFFFFFF);
         paint.setStyle(Paint.Style.FILL);
@@ -1243,7 +1257,7 @@ public final class BoardView extends View {
     private Path cardPath(String type, RectF bounds) {
         Path path = new Path();
         float radius = Math.min(bounds.width(), bounds.height());
-        if ("weather".equals(type)) {
+        if (WidgetType.fromId(type).shape == WidgetType.Shape.WEATHER) {
             float aspect = bounds.width() / bounds.height();
             if (aspect > .75f && aspect < 1.4f) {
                 float half = radius / 2f;
@@ -1254,10 +1268,10 @@ public final class BoardView extends View {
                 path.addRoundRect(bounds, radius * .46f, radius * .46f,
                         Path.Direction.CW);
             }
-        } else if ("prayer".equals(type)) {
+        } else if (WidgetType.fromId(type).shape == WidgetType.Shape.PRAYER) {
             float prayerRadius = BoardLayout.prayerRadius(bounds.width(), bounds.height());
             path.addRoundRect(bounds, prayerRadius, prayerRadius, Path.Direction.CW);
-        } else if ("media".equals(type)) {
+        } else if (WidgetType.fromId(type).shape == WidgetType.Shape.MEDIA) {
             path.addRoundRect(bounds, radius * .22f, radius * .22f, Path.Direction.CW);
         } else {
             path.addRoundRect(bounds, radius * .28f, radius * .28f, Path.Direction.CW);
@@ -1266,9 +1280,10 @@ public final class BoardView extends View {
     }
 
     private void drawCardSurface(Canvas canvas, String type, RectF bounds) {
-        int color = "clock".equals(type) ? colours.surfaceContainerHigh
-                : "prayer".equals(type) ? colours.primaryContainer
-                : "media".equals(type) ? colours.secondaryContainer
+        WidgetType widget = WidgetType.fromId(type);
+        int color = widget == WidgetType.CLOCK ? colours.surfaceContainerHigh
+                : widget == WidgetType.PRAYER ? colours.primaryContainer
+                : widget == WidgetType.MEDIA ? colours.secondaryContainer
                 : colours.tertiaryContainer;
         drawGlassSurface(canvas, cardPath(type, bounds), bounds, color);
     }
@@ -1798,10 +1813,18 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
-    private void drawClock(Canvas canvas, RectF r) {
+    void drawClock(Canvas canvas, RectF r) {
+        String time = new SimpleDateFormat("12h".equals(renderingCard.options.get("format"))
+                ? "h:mm a" : "HH:mm", AppLocale.locale(getContext())).format(new Date());
+        clockDisplayTime = time;
+        boolean showDate = option(renderingCard, "show_date");
+        boolean showHijri = "true".equals(renderingCard.options.get("show_hijri"));
+        String date = showDate ? this.date : "";
+        String hijri = showHijri ? hijriDate() : "";
+
         Typeface clockFace = Fonts.medium(getContext());
         float size = fit(time, r.height() * .60f, r.width(), clockFace);
-        float dateSize = fit(date, Math.min(18f * unit(), r.height() * .16f),
+        float dateSize = fit(date.length() > hijri.length() ? date : hijri, Math.min(18f * unit(), r.height() * .16f),
                 r.width(), Fonts.regular(getContext()));
         paint.setTypeface(clockFace);
         paint.setTextSize(size);
@@ -1810,18 +1833,44 @@ public final class BoardView extends View {
         paint.setTextSize(dateSize);
         Paint.FontMetrics dateMetrics = paint.getFontMetrics();
         float spacing = 5f * unit();
-        float blockHeight = timeMetrics.descent - timeMetrics.ascent + spacing
-                + dateMetrics.descent - dateMetrics.ascent;
+        float lineHeight = spacing + dateMetrics.descent - dateMetrics.ascent;
+        float blockHeight = timeMetrics.descent - timeMetrics.ascent
+                + (date.isEmpty() ? 0 : lineHeight) + (hijri.isEmpty() ? 0 : lineHeight);
+        if (blockHeight > r.height()) {
+            float scale = r.height() / blockHeight;
+            size *= scale; dateSize *= scale; spacing *= scale;
+            paint.setTypeface(clockFace); paint.setTextSize(size);
+            timeMetrics = paint.getFontMetrics();
+            paint.setTypeface(Fonts.regular(getContext())); paint.setTextSize(dateSize);
+            dateMetrics = paint.getFontMetrics();
+            lineHeight = spacing + dateMetrics.descent - dateMetrics.ascent;
+            blockHeight = timeMetrics.descent - timeMetrics.ascent
+                    + (date.isEmpty() ? 0 : lineHeight) + (hijri.isEmpty() ? 0 : lineHeight);
+        }
         float blockTop = r.top + (r.height() - blockHeight) / 2f;
         float y = blockTop - timeMetrics.ascent;
         text(canvas, time, r.left, y, size, CREAM,
                 clockFace, r.width());
         float dateY = y + timeMetrics.descent + spacing - dateMetrics.ascent;
-        text(canvas, date, r.left, dateY, dateSize, SAGE,
+        if (!date.isEmpty()) text(canvas, date, r.left, dateY, dateSize, SAGE,
                 Fonts.regular(getContext()), r.width());
+        if (!hijri.isEmpty()) {
+            text(canvas, hijri, r.left, dateY + (date.isEmpty() ? 0 : lineHeight),
+                    dateSize, SAGE, Fonts.regular(getContext()), r.width());
+        }
     }
 
-    private void drawPrayer(Canvas canvas, RectF r) {
+    private String hijriDate() {
+        java.time.chrono.HijrahDate day = java.time.chrono.HijrahDate.now();
+        String[] months = "ms".equals(AppLocale.locale(getContext()).getLanguage())
+                ? new String[] {"Muharam", "Safar", "Rabiulawal", "Rabiulakhir", "Jamadilawal", "Jamadilakhir", "Rejab", "Syaaban", "Ramadan", "Syawal", "Zulkaedah", "Zulhijah"}
+                : new String[] {"Muharram", "Safar", "Rabi al-Awwal", "Rabi al-Thani", "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Shaban", "Ramadan", "Shawwal", "Dhu al-Qadah", "Dhu al-Hijjah"};
+        return day.get(java.time.temporal.ChronoField.DAY_OF_MONTH) + " "
+                + months[day.get(java.time.temporal.ChronoField.MONTH_OF_YEAR) - 1] + " "
+                + day.get(java.time.temporal.ChronoField.YEAR) + " H";
+    }
+
+    void drawPrayer(Canvas canvas, RectF r) {
         WidgetData.PrayerRow next = null;
         if (prayer != null && prayer.rows != null) {
             for (WidgetData.PrayerRow row : prayer.rows) {
@@ -1839,7 +1888,7 @@ public final class BoardView extends View {
         float minColumnWidth = prayerColumnWidth(rows, rowNameSize, rowTimeSize);
         float summaryHeight = Math.min(r.height(), Math.max(28f * unit(),
                 2.5f * Math.min(14f * unit(), r.height() * .22f)));
-        int columns = rows != null && rows.length == 5
+        int columns = !"next".equals(renderingCard.options.get("view")) && rows != null && rows.length == 5
                 ? BoardLayout.prayerRowColumns(r.width(),
                         r.height() - summaryHeight - 3f * unit(),
                         minColumnWidth, rowHeight) : 0;
@@ -1933,6 +1982,7 @@ public final class BoardView extends View {
         }
         String displayCountdown = countdown;
         float countdownY = titleY + titleMetrics.descent + gap - countMetrics.ascent;
+        if (option(renderingCard, "show_countdown")) {
         text(canvas, displayCountdown, x, countdownY, countSize,
                 stale ? DIM : withAlpha(colours.onPrimaryContainer, .8f),
                 Fonts.medium(getContext()), width);
@@ -1945,6 +1995,7 @@ public final class BoardView extends View {
                 text(canvas, "\u00b7 " + prayer.zoneCode, suffixX, countdownY, zoneSize,
                         SAGE, Fonts.regular(getContext()), r.right - suffixX);
             }
+        }
         }
         if (columns != 0) {
             drawPrayerRows(canvas, r, rows, columns, rowTop,
@@ -2067,7 +2118,7 @@ public final class BoardView extends View {
         return artworkTile;
     }
 
-    private void drawMedia(Canvas canvas, RectF r) {
+    void drawMedia(Canvas canvas, RectF r) {
         float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
         float artworkTop = r.centerY() - artworkSize / 2f;
         RectF artwork = new RectF(r.left, artworkTop,
@@ -2209,7 +2260,7 @@ public final class BoardView extends View {
             return;
         }
         for (BoardLayout.Card card : layout.cards) {
-            if (!"media".equals(card.type)) {
+            if (!"media".equals(card.type) || !option(card, "show_progress")) {
                 continue;
             }
             RectF bounds = visualBounds(card);
@@ -2222,9 +2273,9 @@ public final class BoardView extends View {
             float width = Math.max(1f, r.right - x);
             float progress = Math.max(0f, Math.min(1f,
                     (float) media.estimatedPositionMs() / media.duration));
-            float lineY = mediaControlLayout(r).playPause.top - 5f * unit();
+            float lineY = option(card, "show_controls") ? mediaControlLayout(r).playPause.top - 5f * unit() : r.bottom - 3f * unit();
             canvas.save();
-            float alpha = transitionAlpha(card.type, SystemClock.uptimeMillis());
+            float alpha = transitionAlpha(card.id, SystemClock.uptimeMillis());
             if (alpha < 1f) {
                 canvas.saveLayerAlpha(bounds, Math.round(alpha * 255f));
             }
@@ -2258,7 +2309,7 @@ public final class BoardView extends View {
         }
     }
 
-    private void drawWeather(Canvas canvas, RectF r) {
+    void drawWeather(Canvas canvas, RectF r) {
         boolean valid = weather != null && !Double.isNaN(weather.tempC);
         boolean stale = valid && weather.observedAtMillis > 0
                 && System.currentTimeMillis() - weather.observedAtMillis > 60 * 60 * 1000L;
@@ -2283,7 +2334,7 @@ public final class BoardView extends View {
                     Fonts.regular(getContext()), r.width());
             String rain = weather.rainProbability < 0 ? DASH
                     : weather.rainProbability + "%";
-            centeredText(canvas, words.getString(R.string.weather_rain, rain), center,
+            if (option(renderingCard, "show_rain")) centeredText(canvas, words.getString(R.string.weather_rain, rain), center,
                     r.top + r.height() * (stale ? .85f : .91f),
                     Math.min(11f * unit(), r.height() * .12f), colours.primary,
                     Fonts.regular(getContext()), r.width());
@@ -2487,7 +2538,7 @@ public final class BoardView extends View {
 
     private float fit(String value, float size, float width, Typeface face) {
         paint.setTypeface(face);
-        if (value != null && value.equals(time)) {
+        if (value != null && (value.equals(time) || value.equals(clockDisplayTime))) {
             Fonts.displayText(paint);
         } else {
             Fonts.cardText(paint);
@@ -2509,7 +2560,7 @@ public final class BoardView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
         paint.setTypeface(face);
-        if (s.equals(time)) {
+        if (s.equals(time) || s.equals(clockDisplayTime)) {
             Fonts.displayText(paint);
         } else {
             Fonts.cardText(paint);
@@ -2553,6 +2604,9 @@ public final class BoardView extends View {
                     RectF r = bounds(c);
                     if (r.contains(event.getX(), event.getY())) {
                         dragging = c;
+                        selectedCard = c;
+                        if (editStartListener != null) { editStartListener.run(); }
+                        invalidateStatic();
                         downX = event.getX();
                         downY = event.getY();
                         startCol = c.col;
@@ -2577,11 +2631,11 @@ public final class BoardView extends View {
                 int dy = BoardLayout.snap(event.getY() - downY,
                         (getHeight() - 2 * edge()) / 6f);
                 if (resizing) {
-                    layout.resize(dragging, startW + dx, startH + dy);
+                    layout.tryResize(dragging, startW + dx, startH + dy);
                 } else {
-                    layout.move(dragging, startCol + dx, startRow + dy);
+                    layout.tryMove(dragging, startCol + dx, startRow + dy);
                 }
-                Store.prefs(getContext()).edit()
+                if (!editorLayout) Store.prefs(getContext()).edit()
                         .putString(Store.layoutKey(mode), layout.toJson()).apply();
                 invalidateStatic();
                 return true;
@@ -2590,7 +2644,14 @@ public final class BoardView extends View {
                 if (dragging == null) {
                     return false;
                 }
+                BoardLayout.Card tapped = dragging;
+                editorTap = Math.abs(event.getX() - downX) < 8 * getResources().getDisplayMetrics().density
+                        && Math.abs(event.getY() - downY) < 8 * getResources().getDisplayMetrics().density;
+                if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                    dragging.col = startCol; dragging.row = startRow; dragging.w = startW; dragging.h = startH;
+                }
                 dragging = null;
+                if (event.getActionMasked() == MotionEvent.ACTION_UP && selectionListener != null) { selectionListener.accept(tapped); }
                 if (getParent() != null) {
                     getParent().requestDisallowInterceptTouchEvent(false);
                 }

@@ -104,7 +104,7 @@ public final class Store {
         boolean split = SPLIT.equals(mode);
         BoardLayout layout = BoardLayout.fromSaved(saved, legacy, split);
         boolean legacyFull = !split && saved == null && p.contains("layout");
-        if (legacyFull || (saved != null && saved.contains("\"battery\""))) {
+        if (legacyFull || (saved != null && !saved.equals(layout.toJson()))) {
             SharedPreferences.Editor edit = p.edit().putString(layoutKey(mode), layout.toJson());
             if (legacyFull) {
                 edit.remove("layout");

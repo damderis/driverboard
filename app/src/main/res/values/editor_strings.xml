@@ -1,0 +1,18 @@
+<resources>
+    <string name="board_edit_action">Edit board</string>
+    <string name="editor_title">Board editor</string>
+    <string name="editor_back">Back</string>
+    <string name="editor_done">Done</string>
+    <string name="editor_add">Add widget</string>
+    <string name="editor_undo">Undo</string>
+    <string name="editor_redo">Redo</string>
+    <string name="editor_reset">Reset</string>
+    <string name="editor_reset_message">Reset this screen layout to its default?</string>
+    <string name="editor_select_hint">Tap a widget to edit it. Drag to move; drag its corner to resize.</string>
+    <string name="editor_duplicate">Duplicate</string>
+    <string name="editor_delete">Delete</string>
+    <string name="editor_no_space">No space for this widget</string>
+    <string name="editor_option_full">Full</string>
+    <string name="editor_option_next">Next only</string>
+    <string name="editor_size">%1$d × %2$d</string>
+</resources>

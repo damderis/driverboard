@@ -235,7 +235,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         board.setBackground(shape(tone.ground, 32));
         board.setClipToOutline(true);
         board.setContentDescription(getString(R.string.preview_description));
-        board.setEditing(true, () -> {});
+        board.setEditing(false, null);
         preview.addView(board, new FrameLayout.LayoutParams(-1, dp(150)));
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, -2);
         previewParams.bottomMargin = dp(4);
@@ -243,10 +243,13 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         board.addOnLayoutChangeListener((view, left, top, right, bottom,
                 oldLeft, oldTop, oldRight, oldBottom) -> updateAspect());
 
-        TextView hint = text(getString(R.string.edit_hint), 12, false);
-        hint.setTextColor(muted);
-        hint.setPadding(dp(8), dp(10), dp(8), dp(10));
-        content.addView(hint);
+        MaterialButton edit = pill(getString(R.string.board_edit_action));
+        edit.setOnClickListener(view -> startActivity(new Intent(this,
+                BoardEditorActivity.class).putExtra(BoardEditorActivity.EXTRA_MODE, selectedMode)));
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(-1, dp(52));
+        editParams.topMargin = dp(10);
+        editParams.bottomMargin = dp(12);
+        content.addView(edit, editParams);
     }
 
     private void addModeSelector(LinearLayout content) {
@@ -600,21 +603,6 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     }
 
     private void addFooter(LinearLayout content) {
-        MaterialButton reset = textButton(R.string.reset_layout);
-        reset.setGravity(Gravity.CENTER);
-        reset.setMinHeight(dp(48));
-        reset.setTextColor(accent);
-        reset.setOnClickListener(view -> new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.reset_layout)
-                .setMessage(R.string.reset_layout_confirmation)
-                .setPositiveButton(R.string.reset_action, (dialog, which) -> Store.prefs(this).edit()
-                        .putString(Store.layoutKey(selectedMode),
-                                (Store.SPLIT.equals(selectedMode)
-                                        ? BoardLayout.splitDefaults() : BoardLayout.defaults()).toJson())
-                        .apply())
-                .setNegativeButton(R.string.cancel_action, null)
-                .show());
-        content.addView(reset, new LinearLayout.LayoutParams(-1, -2));
         TextView help = text(getString(R.string.auto_help), 11, false);
         help.setTextColor(muted);
         help.setPadding(dp(8), 0, dp(8), dp(8));

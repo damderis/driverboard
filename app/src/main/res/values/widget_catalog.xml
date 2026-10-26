@@ -1,0 +1,14 @@
+<resources>
+    <string name="widget_clock">Clock</string>
+    <string name="widget_prayer">Prayer</string>
+    <string name="widget_media">Media</string>
+    <string name="widget_weather">Weather</string>
+    <string name="widget_time_format">Time format</string>
+    <string name="widget_show_date">Show date</string>
+    <string name="widget_show_hijri">Show Hijri date</string>
+    <string name="widget_prayer_view">Prayer view</string>
+    <string name="widget_show_countdown">Show countdown</string>
+    <string name="widget_show_progress">Show progress</string>
+    <string name="widget_show_controls">Show controls</string>
+    <string name="widget_show_rain">Show rain</string>
+</resources>
