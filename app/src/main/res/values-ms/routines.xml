@@ -19,7 +19,15 @@
     <string name="routine_reciter_value">Qari: %1$s</string>
     <string name="routine_play">Main sekarang</string>
     <string name="routine_delete">Padam rutin</string>
-    <string name="routine_search">Cari mengikut nombor atau nama</string>
+    <string name="routine_search">Nombor, nama, atau julat (55-56)</string>
     <string name="routine_time_invalid">Masa tamat mesti sama atau selepas masa mula.</string>
     <string-array name="routine_days"><item>Isn</item><item>Sel</item><item>Rab</item><item>Kha</item><item>Jum</item><item>Sab</item><item>Ahd</item></string-array>
+    <string name="routine_qari_unknown">belum disahkan</string>
+    <string name="routine_repeat">Ulang</string>
+    <string name="routine_repeat_value">Ulang senarai: %1$d</string>
+    <string name="routine_qari_unplayable">Fail per ayat, tidak boleh dimainkan sebagai surah</string>
+    <string name="routine_surah_invalid">Masukkan nombor surah (1–114), nama, atau julat seperti 55-56. Maksimum 30 surah.</string>
+    <string name="routine_qari_search">Cari qari</string>
+    <string name="routine_down">Turun</string>
+    <string name="routine_up">Naik</string>
 </resources>

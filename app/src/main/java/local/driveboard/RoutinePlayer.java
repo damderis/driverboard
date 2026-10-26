@@ -111,7 +111,7 @@ public final class RoutinePlayer {
 
     private void play(Routine routine, boolean scheduled) {
         routine = new Routine(routine.id, routine.name, routine.enabled, routine.days,
-                routine.startTime, routine.endTime, routine.surahs, routine.qariId);
+                routine.startTime, routine.endTime, routine.surahs, routine.qariId, routine.repeatCount);
         final Routine selected = routine;
         if (routine.surahs.isEmpty()) {
             log("empty list for " + routine.id);
@@ -168,7 +168,7 @@ public final class RoutinePlayer {
                     }
                     Set<String> allowed = new HashSet<>();
                     List<MediaItem> items = new ArrayList<>();
-                    for (int surah : selected.surahs) {
+                    for (int surah : selected.expandedSurahs()) {
                         String id = "sura_" + surah + "_" + selected.qariId;
                         allowed.add(id);
                         items.add(new MediaItem.Builder().setMediaId(id).build());
@@ -182,8 +182,7 @@ public final class RoutinePlayer {
                             log("item " + (item == null ? "null" : item.mediaId));
                             // Only the player's own advance ends the routine; a surah the owner picks keeps playing.
                             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
-                                    && item != null && item.mediaId.startsWith("sura_")
-                                    && !allowed.contains(item.mediaId)) {
+                                    && (item == null || !allowed.contains(item.mediaId))) {
                                 log("past routine boundary");
                                 release(true);
                             }
@@ -211,6 +210,12 @@ public final class RoutinePlayer {
                     });
                     log("setMediaItems " + allowed);
                     controller.setMediaItems(items);
+                    if (controller.isCommandAvailable(Player.COMMAND_SET_REPEAT_MODE)) {
+                        controller.setRepeatMode(Player.REPEAT_MODE_OFF);
+                    }
+                    if (controller.isCommandAvailable(Player.COMMAND_SET_SHUFFLE_MODE)) {
+                        controller.setShuffleModeEnabled(false);
+                    }
                     log("prepare");
                     controller.prepare();
                     log("play");

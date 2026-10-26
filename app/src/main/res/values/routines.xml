@@ -19,7 +19,15 @@
     <string name="routine_reciter_value">Reciter: %1$s</string>
     <string name="routine_play">Play now</string>
     <string name="routine_delete">Delete routine</string>
-    <string name="routine_search">Search by number or name</string>
+    <string name="routine_search">Number, name, or range (55-56)</string>
     <string name="routine_time_invalid">End time must be at or after start time.</string>
     <string-array name="routine_days"><item>Mon</item><item>Tue</item><item>Wed</item><item>Thu</item><item>Fri</item><item>Sat</item><item>Sun</item></string-array>
+    <string name="routine_qari_unknown">unverified</string>
+    <string name="routine_repeat">Repeat</string>
+    <string name="routine_repeat_value">Repeat list: %1$d</string>
+    <string name="routine_qari_unplayable">Per-ayah audio only</string>
+    <string name="routine_surah_invalid">Enter a surah number (1–114), name, or range such as 55-56. Maximum 30 surahs.</string>
+    <string name="routine_qari_search">Search reciters</string>
+    <string name="routine_down">Move down</string>
+    <string name="routine_up">Move up</string>
 </resources>

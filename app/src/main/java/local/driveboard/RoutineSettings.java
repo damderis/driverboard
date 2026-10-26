@@ -35,6 +35,7 @@ final class RoutineSettings {
     private final AppCompatActivity activity;
     private final List<Routine> routines;
     private LinearLayout container;
+    private Runnable refreshQaris;
 
     RoutineSettings(AppCompatActivity activity) {
         this.activity = activity;
@@ -46,6 +47,12 @@ final class RoutineSettings {
         container.setPadding(0, dp(20), 0, dp(8));
         parent.addView(container);
         render();
+        QariCatalog.refresh(activity, () -> {
+            if (!activity.isFinishing() && !activity.isDestroyed()) {
+                render();
+                if (refreshQaris != null) { refreshQaris.run(); }
+            }
+        });
     }
 
     private int dp(int value) {
@@ -162,8 +169,23 @@ final class RoutineSettings {
             int number = routine.surahs.get(index);
             LinearLayout row = new LinearLayout(activity);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(label((index + 1) + ". " + QuranCatalog.get(number).name, 15),
-                    new LinearLayout.LayoutParams(0, -2, 1));
+            body.addView(label((index + 1) + ". " + QuranCatalog.get(number).name, 15));
+            MaterialButton up = button(R.string.routine_up, () -> move(routine, position, -1));
+            up.setText("↑");
+            up.setContentDescription(activity.getString(R.string.routine_up));
+            up.setMinimumWidth(0);
+            up.setMinWidth(0);
+            up.setPadding(0, 0, 0, 0);
+            up.setEnabled(position > 0);
+            row.addView(up, new LinearLayout.LayoutParams(dp(48), -2));
+            MaterialButton down = button(R.string.routine_down, () -> move(routine, position, 1));
+            down.setText("↓");
+            down.setContentDescription(activity.getString(R.string.routine_down));
+            down.setMinimumWidth(0);
+            down.setMinWidth(0);
+            down.setPadding(0, 0, 0, 0);
+            down.setEnabled(position < routine.surahs.size() - 1);
+            row.addView(down, new LinearLayout.LayoutParams(dp(48), -2));
             MaterialButton remove = button(R.string.routine_remove, () -> {
                 routine.surahs.remove(position);
                 save();
@@ -175,17 +197,23 @@ final class RoutineSettings {
             body.addView(row);
         }
         body.addView(button(R.string.routine_add_surah, () -> pickSurah(routine)));
-        MaterialButton reciter = button(R.string.routine_reciter, () ->
-                new MaterialAlertDialogBuilder(activity).setTitle(R.string.routine_reciter)
-                        .setSingleChoiceItems(new String[] {"Husary", "Minshawi Murattal"},
-                                routine.qariId == 1 ? 0 : 1, (dialog, which) -> {
-                                    routine.qariId = which == 0 ? 1 : 0;
+        MaterialButton repeat = button(R.string.routine_repeat, () ->
+                new MaterialAlertDialogBuilder(activity).setTitle(R.string.routine_repeat)
+                        .setSingleChoiceItems(new String[] {"1", "2", "3", "4", "5"},
+                                routine.repeatCount - 1, (dialog, which) -> {
+                                    routine.repeatCount = which + 1;
                                     save();
                                     dialog.dismiss();
                                     render();
                                 }).show());
-        reciter.setText(activity.getString(R.string.routine_reciter_value,
-                routine.qariId == 1 ? "Husary" : "Minshawi Murattal"));
+        repeat.setText(activity.getString(R.string.routine_repeat_value, routine.repeatCount));
+        body.addView(repeat);
+        MaterialButton reciter = button(R.string.routine_reciter, () -> pickReciter(routine));
+        String qariName = "Qari #" + routine.qariId;
+        for (QariCatalog.Entry entry : QariCatalog.entries(activity)) {
+            if (entry.id == routine.qariId) { qariName = entry.name; break; }
+        }
+        reciter.setText(activity.getString(R.string.routine_reciter_value, qariName));
         body.addView(reciter);
         MaterialButton play = button(R.string.routine_play, () ->
                 RoutinePlayer.get(activity).playNow(routine));
@@ -281,9 +309,115 @@ final class RoutineSettings {
         filter.run();
         androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle(R.string.routine_add_surah).setView(content)
-                .setNegativeButton(android.R.string.cancel, null).create();
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.routine_add_surah, null).create();
         list.setOnItemClickListener((parent, view, position, id) -> {
-            routine.surahs.add(matches.get(position).number);
+            addSurahs(routine, String.valueOf(matches.get(position).number), dialog);
+        });
+        dialog.show();
+        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view ->
+                addSurahs(routine, search.getText().toString(), dialog));
+    }
+
+    private void addSurahs(Routine routine, String input, androidx.appcompat.app.AlertDialog dialog) {
+        try {
+            List<Integer> added = RoutineInputs.parseSurahs(input);
+            if (routine.surahs.size() + added.size() > 30) { throw new IllegalArgumentException(); }
+            routine.surahs.addAll(added);
+            save();
+            dialog.dismiss();
+            render();
+        } catch (IllegalArgumentException error) {
+            Toast.makeText(activity, R.string.routine_surah_invalid, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void move(Routine routine, int position, int delta) {
+        java.util.Collections.swap(routine.surahs, position, position + delta);
+        save();
+        render();
+    }
+
+    private void pickReciter(Routine routine) {
+        LinearLayout content = column();
+        content.setPadding(dp(20), 0, dp(20), 0);
+        EditText search = new EditText(activity);
+        search.setSingleLine(true);
+        search.setHint(R.string.routine_qari_search);
+        content.addView(search);
+        ListView list = new ListView(activity);
+        content.addView(list, new LinearLayout.LayoutParams(-1, dp(360)));
+        List<QariCatalog.Entry> matches = new ArrayList<>();
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(activity,
+                android.R.layout.simple_list_item_2, android.R.id.text1) {
+            @Override
+            public boolean areAllItemsEnabled() { return false; }
+            @Override
+            public boolean isEnabled(int position) {
+                return matches.get(position).status != QariCatalog.UNPLAYABLE;
+            }
+            @Override
+            public android.view.View getView(int position, android.view.View recycled,
+                    android.view.ViewGroup parent) {
+                android.view.View view = super.getView(position, recycled, parent);
+                QariCatalog.Entry entry = matches.get(position);
+                TextView title = view.findViewById(android.R.id.text1);
+                TextView note = view.findViewById(android.R.id.text2);
+                title.setText((entry.id == routine.qariId ? "✓ " : "") + entry.name);
+                note.setText(entry.status == QariCatalog.UNPLAYABLE
+                        ? activity.getString(R.string.routine_qari_unplayable)
+                        : entry.status == QariCatalog.UNKNOWN
+                                ? activity.getString(R.string.routine_qari_unknown) : "");
+                note.setVisibility(note.getText().length() == 0
+                        ? android.view.View.GONE : android.view.View.VISIBLE);
+                view.setEnabled(isEnabled(position));
+                view.setAlpha(isEnabled(position) ? 1f : 0.45f);
+                return view;
+            }
+        };
+        list.setAdapter(adapter);
+        Runnable filter = () -> {
+            String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            matches.clear();
+            adapter.clear();
+            List<QariCatalog.Entry> entries = new ArrayList<>(QariCatalog.entries(activity));
+            boolean savedPresent = false;
+            for (QariCatalog.Entry entry : entries) {
+                if (entry.id == routine.qariId) { savedPresent = true; }
+            }
+            if (!savedPresent) {
+                entries.add(new QariCatalog.Entry(routine.qariId, "Qari #" + routine.qariId,
+                        QariCatalog.UNKNOWN));
+            }
+            entries.sort(java.util.Comparator.comparingInt((QariCatalog.Entry entry) ->
+                    entry.status == QariCatalog.PLAYABLE ? 0 :
+                            entry.status == QariCatalog.UNKNOWN ? 1 : 2)
+                    .thenComparing(entry -> entry.name, String.CASE_INSENSITIVE_ORDER));
+            for (QariCatalog.Entry entry : entries) {
+                if (!entry.name.toLowerCase(Locale.ROOT).contains(query)
+                        && !String.valueOf(entry.id).equals(query)) { continue; }
+                matches.add(entry);
+                adapter.add(entry.name);
+            }
+            adapter.notifyDataSetChanged();
+        };
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) { filter.run(); }
+            @Override
+            public void afterTextChanged(Editable text) {}
+        });
+        filter.run();
+        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.routine_reciter).setView(content)
+                .setNegativeButton(android.R.string.cancel, null).create();
+        refreshQaris = filter;
+        dialog.setOnDismissListener(ignored -> refreshQaris = null);
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            if (!adapter.isEnabled(position)) { return; }
+            routine.qariId = matches.get(position).id;
             save();
             dialog.dismiss();
             render();

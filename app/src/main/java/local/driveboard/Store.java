@@ -42,26 +42,7 @@ public final class Store {
             return result;
         }
         try {
-            JSONArray array = new JSONArray(saved);
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject item = array.getJSONObject(i);
-                EnumSet<DayOfWeek> days = EnumSet.noneOf(DayOfWeek.class);
-                JSONArray dayValues = item.getJSONArray("days");
-                for (int j = 0; j < dayValues.length(); j++) {
-                    days.add(DayOfWeek.of(dayValues.getInt(j)));
-                }
-                List<Integer> surahs = new ArrayList<>();
-                JSONArray surahValues = item.getJSONArray("surahs");
-                for (int j = 0; j < surahValues.length(); j++) {
-                    int surah = surahValues.getInt(j);
-                    if (surah >= 1 && surah <= 114) {
-                        surahs.add(surah);
-                    }
-                }
-                result.add(new Routine(item.getString("id"), item.getString("name"),
-                        item.optBoolean("enabled", true), days, item.getString("startTime"),
-                        item.getString("endTime"), surahs, item.optInt("qariId", 1)));
-            }
+            result.addAll(RoutineJson.decode(saved));
         } catch (Exception error) {
             CarDiagnostics.log(context, "Routine read failed " + error);
         }
@@ -69,30 +50,20 @@ public final class Store {
     }
 
     public static synchronized void saveRoutines(Context context, List<Routine> routines) {
-        JSONArray array = new JSONArray();
         try {
-            for (Routine routine : routines) {
-                JSONObject item = new JSONObject();
-                item.put("id", routine.id);
-                item.put("name", routine.name);
-                item.put("enabled", routine.enabled);
-                JSONArray days = new JSONArray();
-                for (DayOfWeek day : routine.days) {
-                    days.put(day.getValue());
-                }
-                item.put("days", days);
-                item.put("startTime", routine.startTime);
-                item.put("endTime", routine.endTime);
-                item.put("surahs", new JSONArray(routine.surahs));
-                item.put("qariId", routine.qariId);
-                array.put(item);
-            }
-            prefs(context).edit().putString("quran_routines", array.toString()).apply();
+            prefs(context).edit().putString("quran_routines", RoutineJson.encode(routines)).apply();
         } catch (Exception error) {
             CarDiagnostics.log(context, "Routine save failed " + error);
         }
     }
 
+    public static String qariCatalogJson(Context context) {
+        return prefs(context).getString("qari_catalog", null);
+    }
+
+    public static void saveQariCatalogJson(Context context, String json) {
+        prefs(context).edit().putString("qari_catalog", json).apply();
+    }
     public static synchronized Map<String, LocalDate> routineLastRuns(Context context) {
         Map<String, LocalDate> result = new HashMap<>();
         try {
