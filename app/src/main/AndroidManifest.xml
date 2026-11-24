@@ -15,7 +15,6 @@
         </activity>
         <activity android:name=".BoardEditorActivity" android:exported="false"
             android:screenOrientation="landscape" />
-        <service android:name=".QuranMediaService" android:exported="true" android:label="@string/app_name" android:icon="@drawable/ic_driveboard"><intent-filter><action android:name="android.media.browse.MediaBrowserService"/></intent-filter></service>
         <service android:name=".DriveBoardService" android:exported="true">
             <intent-filter><action android:name="androidx.car.app.CarAppService"/><category android:name="androidx.car.app.category.NAVIGATION"/></intent-filter>
         </service>
