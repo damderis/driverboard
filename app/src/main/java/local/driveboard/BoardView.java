@@ -704,6 +704,7 @@ public final class BoardView extends View {
         date = new SimpleDateFormat("EEE d MMM", AppLocale.locale(getContext())).format(now);
         prayer = WidgetData.prayerSnapshot(words);
         weather = WeatherRepository.snapshot(words);
+        if (findCard("audio") != null) audio = AudioSwitchClient.read(getContext());
         media = WidgetData.mediaSnapshot(words);
         requestQuranPositionData();
         updateQuranPosition(media);
@@ -1051,6 +1052,33 @@ public final class BoardView extends View {
             drawCard(canvas, c, r);
         }
         if (editing) { drawGrid(canvas); }
+        drawPageDots(canvas);
+    }
+
+    private int pageIndex;
+    private int pageCount;
+
+    /** Car only: dots in the bottom margin show which page is on screen. */
+    public void setPageIndicator(int page, int count) {
+        if (page != pageIndex || count != pageCount) {
+            pageIndex = page;
+            pageCount = count;
+            invalidateStatic();
+        }
+    }
+
+    private void drawPageDots(Canvas canvas) {
+        if (pageCount < 2 || editing) return;
+        float radius = Math.max(1.5f, edge() * .28f);
+        float gap = radius * 3.2f;
+        float y = getHeight() - edge() / 2f;
+        float x = getWidth() / 2f - gap * (pageCount - 1) / 2f;
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        for (int i = 0; i < pageCount; i++) {
+            paint.setColor(i == pageIndex ? colours.primary : withAlpha(colours.onSurface, .35f));
+            canvas.drawCircle(x + i * gap, y, radius, paint);
+        }
     }
 
     private void drawCard(Canvas canvas, BoardLayout.Card c, RectF r) {
@@ -1281,9 +1309,10 @@ public final class BoardView extends View {
 
     private void drawCardSurface(Canvas canvas, String type, RectF bounds) {
         WidgetType widget = WidgetType.fromId(type);
-        int color = widget == WidgetType.CLOCK ? colours.surfaceContainerHigh
+        int color = widget == WidgetType.CLOCK || widget == WidgetType.SHORTCUTS
+                ? colours.surfaceContainerHigh
                 : widget == WidgetType.PRAYER ? colours.primaryContainer
-                : widget == WidgetType.MEDIA ? colours.secondaryContainer
+                : widget == WidgetType.MEDIA || widget == WidgetType.AUDIO ? colours.secondaryContainer
                 : colours.tertiaryContainer;
         drawGlassSurface(canvas, cardPath(type, bounds), bounds, color);
     }
@@ -1858,6 +1887,124 @@ public final class BoardView extends View {
             text(canvas, hijri, r.left, dateY + (date.isEmpty() ? 0 : lineHeight),
                     dateSize, SAGE, Fonts.regular(getContext()), r.width());
         }
+    }
+
+    /** Tile rectangles in draw order; shared by drawing and car hit-testing. */
+    private RectF[] shortcutTiles(RectF r, int count) {
+        int cols = Shortcut.columns(count, r.width(), r.height());
+        int rows = (count + cols - 1) / cols;
+        float gap = Math.max(3f * unit(), Math.min(r.width(), r.height()) * .04f);
+        float w = (r.width() - gap * (cols - 1)) / cols;
+        float h = (r.height() - gap * (rows - 1)) / rows;
+        RectF[] tiles = new RectF[count];
+        for (int i = 0; i < count; i++) {
+            float x = r.left + (i % cols) * (w + gap);
+            float y = r.top + (i / cols) * (h + gap);
+            tiles[i] = new RectF(x, y, x + w, y + h);
+        }
+        return tiles;
+    }
+
+    private RectF contentBounds(BoardLayout.Card card) {
+        RectF r = visualBounds(card);
+        float pad = Math.max(4.5f * unit(),
+                Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
+        return new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
+    }
+
+    void drawShortcuts(Canvas canvas, RectF r) {
+        Shortcut[] items = Shortcut.values();
+        RectF[] tiles = shortcutTiles(r, items.length);
+        for (int i = 0; i < items.length; i++) {
+            RectF t = tiles[i];
+            float radius = Math.min(t.width(), t.height()) * .32f;
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(withAlpha(colours.primary, .16f));
+            canvas.drawRoundRect(t, radius, radius, paint);
+            float size = Math.min(t.height() * .30f, 20f * unit());
+            centeredText(canvas, words.getString(items[i].label), t.centerX(),
+                    t.centerY() + size * .35f, size, colours.onSurface,
+                    Fonts.semibold(getContext()), t.width() * .88f);
+        }
+    }
+
+    /** Returns the tapped shortcut action, or null. Only the car calls this. */
+    public String hitShortcut(float x, float y) {
+        for (BoardLayout.Card card : layout.cards) {
+            if (!"shortcuts".equals(card.type) || !visualBounds(card).contains(x, y)) continue;
+            Shortcut[] items = Shortcut.values();
+            RectF[] tiles = shortcutTiles(contentBounds(card), items.length);
+            for (int i = 0; i < items.length; i++) {
+                if (tiles[i].contains(x, y)) return items[i].action;
+            }
+            return "";
+        }
+        return null;
+    }
+
+    private AudioSwitchClient.State audio = AudioSwitchClient.MISSING;
+
+    /** Row 0 is the separate toggle; rows 1 and 2 are car and phone levels with -/+ halves. */
+    private RectF[] audioRows(RectF r) {
+        float gap = Math.max(3f * unit(), r.height() * .04f);
+        float h = (r.height() - 2 * gap) / 3f;
+        RectF[] rows = new RectF[3];
+        for (int i = 0; i < 3; i++) rows[i] = new RectF(r.left, r.top + i * (h + gap), r.right, r.top + i * (h + gap) + h);
+        return rows;
+    }
+
+    void drawAudio(Canvas canvas, RectF r) {
+        float size = Math.min(r.height() * .11f, 18f * unit());
+        if (!audio.installed) {
+            stateText(canvas, words.getString(R.string.audio_missing), r, size, colours.onSurfaceVariant);
+            return;
+        }
+        RectF[] rows = audioRows(r);
+        Typeface semibold = Fonts.semibold(getContext());
+        float radius = rows[0].height() * .5f;
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(audio.enabled ? colours.primary : withAlpha(colours.onSurface, .12f));
+        canvas.drawRoundRect(rows[0], radius, radius, paint);
+        String toggle = words.getString(audio.enabled ? R.string.audio_on : R.string.audio_off);
+        if (audio.enabled && !audio.helpers) toggle = words.getString(R.string.audio_helpers_stopped);
+        centeredText(canvas, toggle, rows[0].centerX(), rows[0].centerY() + size * .35f, size,
+                audio.enabled ? colours.onPrimary : colours.onSurface, semibold, rows[0].width() * .9f);
+        String[] labels = {words.getString(R.string.audio_car, audio.car), words.getString(R.string.audio_phone, audio.phone)};
+        for (int i = 0; i < 2; i++) {
+            RectF row = rows[i + 1];
+            float button = row.height();
+            paint.setColor(withAlpha(colours.primary, .16f));
+            canvas.drawCircle(row.left + button / 2f, row.centerY(), button * .45f, paint);
+            canvas.drawCircle(row.right - button / 2f, row.centerY(), button * .45f, paint);
+            centeredText(canvas, "\u2212", row.left + button / 2f, row.centerY() + size * .4f, size * 1.3f,
+                    colours.onSurface, semibold, button);
+            centeredText(canvas, "+", row.right - button / 2f, row.centerY() + size * .4f, size * 1.3f,
+                    colours.onSurface, semibold, button);
+            centeredText(canvas, labels[i], row.centerX(), row.centerY() + size * .35f, size,
+                    colours.onSurface, Fonts.regular(getContext()), row.width() - 2.2f * button);
+        }
+    }
+
+    /** Returns "toggle", "car-", "car+", "phone-", "phone+", "" for the card body, or null. */
+    public String hitAudio(float x, float y) {
+        BoardLayout.Card card = findCard("audio");
+        if (card == null || !visualBounds(card).contains(x, y)) return null;
+        if (!audio.installed) return "";
+        RectF[] rows = audioRows(contentBounds(card));
+        if (rows[0].contains(x, y)) return "toggle";
+        for (int i = 1; i < 3; i++) {
+            if (!rows[i].contains(x, y)) continue;
+            String key = i == 1 ? "car" : "phone";
+            if (x < rows[i].left + rows[i].height()) return key + "-";
+            if (x > rows[i].right - rows[i].height()) return key + "+";
+        }
+        return "";
+    }
+
+    public AudioSwitchClient.State audioState() {
+        return audio;
     }
 
     private String hijriDate() {
@@ -2636,7 +2783,7 @@ public final class BoardView extends View {
                     layout.tryMove(dragging, startCol + dx, startRow + dy);
                 }
                 if (!editorLayout) Store.prefs(getContext()).edit()
-                        .putString(Store.layoutKey(mode), layout.toJson()).apply();
+                        .putString(Store.layoutKey(mode, Store.page(getContext())), layout.toJson()).apply();
                 invalidateStatic();
                 return true;
             case MotionEvent.ACTION_UP:

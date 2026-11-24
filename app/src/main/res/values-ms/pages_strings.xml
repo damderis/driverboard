@@ -1,0 +1,17 @@
+<resources>
+    <string name="page_drive">Pandu</string>
+    <string name="page_media">Media</string>
+    <string name="page_controls">Kawalan</string>
+    <string name="widget_shortcuts">Pintasan</string>
+    <string name="widget_audio">Audio Switch</string>
+    <string name="sc_quran">Quran</string>
+    <string name="sc_music">Muzik</string>
+    <string name="shortcut_failed">Tidak dapat dibuka</string>
+    <string name="audio_missing">Audio Switch tidak dipasang</string>
+    <string name="audio_on">Asingkan audio: hidup</string>
+    <string name="audio_off">Asingkan audio: mati</string>
+    <string name="audio_helpers_stopped">Hidup · pembantu berhenti</string>
+    <string name="audio_car">Kereta %d%%</string>
+    <string name="audio_phone">Telefon %d%%</string>
+    <string name="audio_reconnect">Sambung semula Android Auto untuk guna</string>
+</resources>

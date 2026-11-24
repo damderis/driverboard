@@ -177,6 +177,34 @@ public final class BoardLayout {
         return b;
     }
 
+    /** Defaults for each car page: Drive, Media, Controls. */
+    public static BoardLayout pageDefaults(int page, boolean split) {
+        BoardLayout b = new BoardLayout();
+        if (page == 1) {
+            if (split) {
+                b.cards.add(new Card("media", 0, 0, 12, 4));
+                b.cards.add(new Card("clock", 0, 4, 12, 2));
+            } else {
+                b.cards.add(new Card("media", 0, 0, 8, 6));
+                b.cards.add(new Card("clock", 8, 0, 4, 3));
+                b.cards.add(new Card("prayer", 8, 3, 4, 3));
+            }
+            return b;
+        }
+        if (page == 2) {
+            if (split) {
+                b.cards.add(new Card("shortcuts", 0, 0, 12, 4));
+                b.cards.add(new Card("audio", 0, 4, 12, 2));
+            } else {
+                b.cards.add(new Card("shortcuts", 0, 0, 7, 6));
+                b.cards.add(new Card("audio", 7, 0, 5, 4));
+                b.cards.add(new Card("clock", 7, 4, 5, 2));
+            }
+            return b;
+        }
+        return split ? splitDefaults() : defaults();
+    }
+
     public static String modeFor(float width, float height) {
         float aspect = width / Math.max(1f, height);
         return aspect < .85f ? "narrow" : aspect >= 1.4f ? "full" : "split";

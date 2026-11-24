@@ -1,0 +1,17 @@
+<resources>
+    <string name="page_drive">Drive</string>
+    <string name="page_media">Media</string>
+    <string name="page_controls">Controls</string>
+    <string name="widget_shortcuts">Shortcuts</string>
+    <string name="widget_audio">Audio Switch</string>
+    <string name="sc_quran">Quran</string>
+    <string name="sc_music">Music</string>
+    <string name="shortcut_failed">Could not open that</string>
+    <string name="audio_missing">Audio Switch not installed</string>
+    <string name="audio_on">Separate audio: on</string>
+    <string name="audio_off">Separate audio: off</string>
+    <string name="audio_helpers_stopped">On · helpers stopped</string>
+    <string name="audio_car">Car %d%%</string>
+    <string name="audio_phone">Phone %d%%</string>
+    <string name="audio_reconnect">Reconnect Android Auto to apply</string>
+</resources>

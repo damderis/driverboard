@@ -229,17 +229,31 @@ public final class BoardScreen extends Screen {
                         }
                     }).build());
         } else {
+            // Shows the next page's name; Android Auto allows four strip actions.
+            int next = (Store.page(getCarContext()) + 1) % Store.PAGE_NAMES.length;
+            actions.addAction(new Action.Builder().setTitle(strings.getString(Store.PAGE_NAMES[next]))
+                    .setOnClickListener(this::nextPage).build());
             actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.lyrics))
                     .setOnClickListener(this::toggleLyrics).build());
             actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.web))
                     .setOnClickListener(() -> openBrowser("https://www.google.com")).build());
-            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.browser_youtube))
-                    .setOnClickListener(() -> openBrowser("https://m.youtube.com")).build());
+            // YouTube moved into Controls; the strip only has room for four actions.
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.page_controls))
+                    .setOnClickListener(() -> getScreenManager().push(
+                            new ControlsScreen(getCarContext(), this))).build());
         }
+        ActionStrip strip = actions.build();
+        CarDiagnostics.log(getCarContext(), "Template actions=" + strip.getActions().size()
+                + " page=" + Store.page(getCarContext()));
         NavigationTemplate.Builder template = new NavigationTemplate.Builder()
-                .setActionStrip(actions.build());
+                .setActionStrip(strip);
         if (browserMode && getCarContext().getCarAppApiLevel() >= 2) {
             template.setMapActionStrip(new ActionStrip.Builder().addAction(Action.PAN).build());
+        } else if (!lyricsVisible && getCarContext().getCarAppApiLevel() >= 2) {
+            // Host-drawn arrows: they work even on head units that never deliver surface taps.
+            template.setMapActionStrip(new ActionStrip.Builder()
+                    .addAction(pageArrow(R.drawable.ic_page_previous, -1))
+                    .addAction(pageArrow(R.drawable.ic_page_next, 1)).build());
         }
         return template.build();
     }
@@ -287,8 +301,15 @@ public final class BoardScreen extends Screen {
             @Override
             public void onFling(float velocityX, float velocityY) {
                 handler.post(() -> {
-                    if (started && epoch == callbackEpoch && browser != null) {
+                    if (!started || epoch != callbackEpoch) {
+                        return;
+                    }
+                    if (browser != null) {
                         browser.fling(velocityX, velocityY);
+                    } else if (!browserMode && !lyricsVisible
+                            && Math.abs(velocityX) > 2 * Math.abs(velocityY)) {
+                        // Swipe left for the next page, right for the previous one.
+                        changePage(velocityX < 0 ? 1 : -1);
                     }
                 });
             }
@@ -311,6 +332,11 @@ public final class BoardScreen extends Screen {
         }
         WeatherRepository.start(getCarContext(), weatherCallback);
         scheduleTick();
+        if (pendingShortcut != null) {
+            String action = pendingShortcut;
+            pendingShortcut = null;
+            handler.post(() -> runShortcut(action));
+        }
     }
 
     private void stopRendering() {
@@ -765,6 +791,7 @@ public final class BoardScreen extends Screen {
         }
         board.setMode(mode);
         board.setCarNight(night);
+        board.setPageIndicator(Store.page(getCarContext()), Store.PAGE_NAMES.length);
         long refreshNow = android.os.SystemClock.elapsedRealtime();
         if (refreshNeeded || refreshNow - lastRefresh >= 1000) {
             refreshNeeded = false;
@@ -855,6 +882,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch || getCarContext().getCarAppApiLevel() < 5) {
             return;
         }
+        CarDiagnostics.log(getCarContext(), "Surface click " + Math.round(x) + "," + Math.round(y));
         if (browserMode) {
             if (browser != null) {
                 browser.click(x, y);
@@ -869,8 +897,139 @@ public final class BoardScreen extends Screen {
         if (board.hitMediaControl(localX, localY)) {
             return;
         }
+        if (!lyricsVisible) {
+            String shortcut = board.hitShortcut(localX, localY);
+            if (shortcut != null) {
+                runShortcut(shortcut);
+                return;
+            }
+            String audio = board.hitAudio(localX, localY);
+            if (audio != null) {
+                runAudio(audio);
+                return;
+            }
+        }
         if (lyricsVisible || board.hitNowPlaying(localX, localY)) {
             toggleLyrics();
+        }
+    }
+
+    private void nextPage() {
+        changePage(1);
+    }
+
+    private Action pageArrow(int icon, int delta) {
+        return new Action.Builder()
+                .setIcon(new androidx.car.app.model.CarIcon.Builder(
+                        androidx.core.graphics.drawable.IconCompat.createWithResource(
+                                getCarContext(), icon)).build())
+                .setOnClickListener(() -> changePage(delta)).build();
+    }
+
+    private void changePage(int delta) {
+        Store.setPage(getCarContext(), Store.page(getCarContext()) + delta);
+        CarDiagnostics.log(getCarContext(), "Page " + Store.page(getCarContext()));
+        board.prepareLayoutTransition();
+        refreshNeeded = true;
+        invalidate();
+        drawBoard();
+    }
+
+    private String pendingShortcut;
+
+    void runShortcut(String action) {
+        if (action.isEmpty()) return;
+        if (!started) {
+            // Called while Controls is closing; run once this screen restarts.
+            pendingShortcut = action;
+            return;
+        }
+        if (action.startsWith("web:")) {
+            openBrowser(action.substring(4));
+        } else if ("lyrics".equals(action)) {
+            toggleLyrics();
+        } else {
+            launchShortcut(getCarContext(), action);
+        }
+    }
+
+    /** The app's live media session, readable through DriveBoard's notification access. */
+    private static android.media.session.MediaController activeSession(CarContext context, String app) {
+        try {
+            android.media.session.MediaSessionManager manager =
+                    context.getSystemService(android.media.session.MediaSessionManager.class);
+            // Quran keeps an idle phone session (reports PLAYING at 0:00, no PLAY action) next
+            // to its real player session; only the one that accepts PLAY can start audio.
+            android.media.session.MediaController fallback = null;
+            for (android.media.session.MediaController session : manager.getActiveSessions(
+                    new android.content.ComponentName(context, MediaAccessService.class))) {
+                if (!app.equals(session.getPackageName())) continue;
+                android.media.session.PlaybackState state = session.getPlaybackState();
+                long actions = state == null ? 0 : state.getActions();
+                if ((actions & (android.media.session.PlaybackState.ACTION_PLAY
+                        | android.media.session.PlaybackState.ACTION_PLAY_PAUSE)) != 0) {
+                    return session;
+                }
+                if (fallback == null) fallback = session;
+            }
+            return fallback;
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(context, "Session lookup failed " + error);
+        }
+        return null;
+    }
+
+    /** media: actions; shared with the Controls list. */
+    static void launchShortcut(CarContext context, String action) {
+        CarDiagnostics.log(context, "Shortcut " + action);
+        String app = action.substring(action.indexOf(':') + 1);
+        try {
+            // Android Auto refuses to open other apps from a car app, and both Quran and Morphe
+            // reject outside controller connections. A PLAY media key reaches either player.
+            // ponytail: resumes whatever the app last had queued; picking a surah or playlist
+            // needs the app's MediaBrowser, which these apps only open to Android Auto itself.
+            android.view.KeyEvent down = new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
+            android.view.KeyEvent up = new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY);
+            android.media.session.MediaController session = activeSession(context, app);
+            if (session != null) {
+                session.dispatchMediaButtonEvent(down);
+                session.dispatchMediaButtonEvent(up);
+                CarDiagnostics.log(context, "Shortcut play key to session " + app);
+            } else {
+                // No live session: wake the app's media-button receiver directly.
+                for (android.view.KeyEvent key : new android.view.KeyEvent[] {down, up}) {
+                    context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON)
+                            .setPackage(app).putExtra(android.content.Intent.EXTRA_KEY_EVENT, key));
+                }
+                CarDiagnostics.log(context, "Shortcut play key broadcast " + app);
+            }
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(context, "Shortcut failed " + error);
+            androidx.car.app.CarToast.makeText(context,
+                    AppLocale.wrap(context).getString(R.string.shortcut_failed),
+                    androidx.car.app.CarToast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void runAudio(String hit) {
+        if (hit.isEmpty()) return;
+        applyAudio(getCarContext(), hit);
+        refreshNeeded = true;
+        drawBoard();
+    }
+
+    /** Shared by the board card and the Controls list. */
+    static void applyAudio(CarContext context, String hit) {
+        boolean wasEnabled = AudioSwitchClient.read(context).enabled;
+        String failure = AudioSwitchClient.apply(context, hit);
+        CarDiagnostics.log(context, "Audio " + hit + ": " + (failure == null ? "saved" : failure));
+        if (failure == null && "toggle".equals(hit) && !wasEnabled) {
+            // Policy order matters: the separation rule only applies after the next reconnect.
+            androidx.car.app.CarToast.makeText(context,
+                    AppLocale.wrap(context).getString(R.string.audio_reconnect),
+                    androidx.car.app.CarToast.LENGTH_LONG).show();
         }
     }
 

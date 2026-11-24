@@ -20,7 +20,9 @@ public enum WidgetType {
             toggle("show_progress", R.string.widget_show_progress, true),
             toggle("show_controls", R.string.widget_show_controls, true)),
     WEATHER("weather", R.string.widget_weather, "\u2601", 3, 3, 2, 2, true, Padding.DEFAULT, Shape.WEATHER, BoardView::drawWeather,
-            toggle("show_rain", R.string.widget_show_rain, true));
+            toggle("show_rain", R.string.widget_show_rain, true)),
+    SHORTCUTS("shortcuts", R.string.widget_shortcuts, "\u2197", 6, 3, 3, 2, false, Padding.DEFAULT, Shape.CLOCK, BoardView::drawShortcuts),
+    AUDIO("audio", R.string.widget_audio, "\u21C4", 4, 3, 3, 2, false, Padding.DEFAULT, Shape.CLOCK, BoardView::drawAudio);
 
     public interface Drawer {
         void draw(BoardView board, android.graphics.Canvas canvas, android.graphics.RectF bounds);

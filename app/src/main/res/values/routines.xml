@@ -1,6 +1,9 @@
 <resources>
     <string name="routine_title">Quran routines</string>
-    <string name="routine_help">Starts 8 seconds after the car connects. Times use your local clock.</string>
+    <string name="routine_help">Each routine starts automatically at most once per day, 8 seconds after the car connects. Reconnecting will not restart it. Times use your local clock. Play now is always available.</string>
+    <string name="routine_daily_help">One automatic start per routine each day</string>
+    <string name="routine_manage">Manage</string>
+    <string name="routine_manage_description">Manage Quran routines</string>
     <string name="routine_morning">Morning routine</string>
     <string name="routine_friday">Friday evening</string>
     <string name="routine_add">Add routine</string>

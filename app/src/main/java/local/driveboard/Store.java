@@ -24,8 +24,21 @@ public final class Store {
         return context.getApplicationContext().getSharedPreferences("driveboard", Context.MODE_PRIVATE);
     }
 
-    public static String layoutKey(String mode) {
-        return SPLIT.equals(mode) ? "split_layout" : "full_layout";
+    /** Car pages in action-strip order; page 0 keeps the original layout keys. */
+    public static final int[] PAGE_NAMES = {R.string.page_drive, R.string.page_media,
+            R.string.page_controls};
+
+    public static int page(Context context) {
+        return BoardLayout.clamp(prefs(context).getInt("car_page", 0), 0, PAGE_NAMES.length - 1);
+    }
+
+    public static void setPage(Context context, int page) {
+        prefs(context).edit().putInt("car_page", Math.floorMod(page, PAGE_NAMES.length)).apply();
+    }
+
+    public static String layoutKey(String mode, int page) {
+        String base = SPLIT.equals(mode) ? "split_layout" : "full_layout";
+        return page == 0 ? base : base + "_p" + page;
     }
 
     public static synchronized List<Routine> routines(Context context) {
@@ -79,33 +92,52 @@ public final class Store {
         return result;
     }
 
-    public static synchronized void markRoutineRun(Context context, String id, LocalDate date) {
-        Map<String, LocalDate> runs = routineLastRuns(context);
-        runs.put(id, date);
-        JSONObject saved = new JSONObject();
+    /** Claims one automatic attempt per routine and local day, before any media connection. */
+    public static synchronized boolean claimRoutineRun(Context context, String id, LocalDate date) {
+        if (id == null || date == null || date.equals(routineLastRuns(context).get(id))) {
+            return false;
+        }
         try {
-            for (Map.Entry<String, LocalDate> run : runs.entrySet()) {
-                saved.put(run.getKey(), run.getValue().toString());
-            }
-            prefs(context).edit().putString("quran_routine_runs", saved.toString()).apply();
+            JSONObject saved = new JSONObject(prefs(context).getString("quran_routine_runs", "{}"));
+            saved.put(id, date.toString());
+            // Commit before starting playback: process death or a failed connection must not
+            // make the same routine start again on the next car connection that day.
+            return prefs(context).edit().putString("quran_routine_runs", saved.toString()).commit();
         } catch (Exception error) {
             CarDiagnostics.log(context, "Routine last-run save failed " + error);
+            return false;
         }
     }
 
+    /** Play now is manual and does not consume the routine's daily automatic attempt. */
+    public static synchronized void markRoutineRun(Context context, String id, LocalDate date) {
+        claimRoutineRun(context, id, date);
+    }
+
     public static BoardLayout layout(Context context, String mode) {
+        return layout(context, mode, page(context));
+    }
+
+    public static BoardLayout layout(Context context, String mode, int page) {
         if (NARROW.equals(mode)) {
+            // ponytail: the narrow strip always derives from the Drive page; give pages
+            // their own narrow layouts if the e.MAS ever shows a narrow panel with pages.
             return BoardLayout.narrowDefaults(WidgetData.mediaSnapshot(context).playing,
-                    layout(context, SPLIT));
+                    layout(context, SPLIT, 0));
         }
         SharedPreferences p = prefs(context);
-        String saved = p.getString(layoutKey(mode), null);
-        String legacy = p.getString("layout", null);
         boolean split = SPLIT.equals(mode);
+        String key = layoutKey(mode, page);
+        String saved = p.getString(key, null);
+        if (page > 0) {
+            return saved == null ? BoardLayout.pageDefaults(page, split)
+                    : BoardLayout.fromJson(saved, split);
+        }
+        String legacy = p.getString("layout", null);
         BoardLayout layout = BoardLayout.fromSaved(saved, legacy, split);
         boolean legacyFull = !split && saved == null && p.contains("layout");
         if (legacyFull || (saved != null && !saved.equals(layout.toJson()))) {
-            SharedPreferences.Editor edit = p.edit().putString(layoutKey(mode), layout.toJson());
+            SharedPreferences.Editor edit = p.edit().putString(key, layout.toJson());
             if (legacyFull) {
                 edit.remove("layout");
             }

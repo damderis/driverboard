@@ -15,7 +15,6 @@ import androidx.media3.session.SessionToken;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -55,14 +54,17 @@ public final class RoutinePlayer {
             int generation = carStartGeneration;
             log("car start; waiting 8 seconds");
             handler.postDelayed(() -> {
-                if (generation != carStartGeneration) {
+                if (generation != carStartGeneration || !startPending) {
+                    log("cancelled before daily attempt");
                     return;
                 }
                 startPending = false;
-                Routine due = RoutineSchedule.due(Store.routines(context), LocalDateTime.now(),
-                        Store.routineLastRuns(context));
+                LocalDateTime now = LocalDateTime.now();
+                Routine due = RoutineSchedule.claimDue(Store.routines(context), now,
+                        Store.routineLastRuns(context),
+                        (id, date) -> Store.claimRoutineRun(context, id, date));
                 if (due == null) {
-                    log("none due");
+                    log("none due or already attempted today");
                 } else if (quranPlaying()) {
                     log("skipped; Quran already playing");
                 } else {
@@ -123,6 +125,7 @@ public final class RoutinePlayer {
         }
         release(false);
         log("connecting " + routine.id);
+        int scheduledGeneration = carStartGeneration;
         try {
             SessionToken token = new SessionToken(context, new ComponentName(QURAN_PACKAGE,
                     "com.quran.labs.feature.autoquran.service.QuranBrowsableAudioPlaybackService"));
@@ -147,6 +150,11 @@ public final class RoutinePlayer {
                 }
             }, 30000);
             future.addListener(() -> {
+                if (scheduled && scheduledGeneration != carStartGeneration) {
+                    log("cancelled disconnected daily attempt");
+                    MediaController.releaseFuture(future);
+                    return;
+                }
                 if (connection != future) {
                     return;
                 }
@@ -221,8 +229,7 @@ public final class RoutinePlayer {
                     log("play");
                     controller.play();
                     if (scheduled) {
-                        Store.markRoutineRun(context, selected.id, LocalDate.now());
-                        log("marked run " + selected.id);
+                        log("daily automatic attempt completed " + selected.id);
                     }
                 } catch (Exception error) {
                     log("start failed " + error);

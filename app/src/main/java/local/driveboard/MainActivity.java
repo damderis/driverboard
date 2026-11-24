@@ -198,7 +198,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addBackgroundRow(card);
         addColoursRow(card);
         addLanguageRow(card);
-        new RoutineSettings(this).attach(content);
+        addRoutinesRow(card);
         addFooter(content);
 
         setContentView(scroll);
@@ -557,6 +557,17 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
             }
         }
         chips.check(selectedId);
+    }
+
+    private void addRoutinesRow(LinearLayout card) {
+        LinearLayout routines = row(card, true);
+        LinearLayout description = description(routines, R.string.routine_title);
+        detail(description, getString(R.string.routine_daily_help));
+        MaterialButton manage = textButton(R.string.routine_manage);
+        manage.setContentDescription(getString(R.string.routine_manage_description));
+        manage.setOnClickListener(view -> startActivity(new Intent(this,
+                RoutineSettingsActivity.class)));
+        routines.addView(manage);
     }
 
     private void addLanguageRow(LinearLayout card) {

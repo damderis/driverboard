@@ -48,6 +48,44 @@ public final class RoutineScheduleTest {
     }
 
     @Test
+    public void automaticAttemptIsClaimedOnlyOncePerRoutineAndDay() {
+        java.util.Map<String, LocalDate> runs = new java.util.HashMap<>();
+        LocalDateTime firstConnection = LocalDateTime.parse("2026-10-26T07:00");
+        assertEquals(morning, RoutineSchedule.claimDue(routines, firstConnection, runs,
+                (id, date) -> {
+                    if (date.equals(runs.get(id))) return false;
+                    runs.put(id, date);
+                    return true;
+                }));
+        for (String reconnect : new String[]{"2026-10-26T07:30", "2026-10-26T09:00",
+                "2026-10-26T11:00"}) {
+            assertNull(RoutineSchedule.claimDue(routines, LocalDateTime.parse(reconnect), runs,
+                    (id, date) -> {
+                        if (date.equals(runs.get(id))) return false;
+                        runs.put(id, date);
+                        return true;
+                    }));
+        }
+        assertEquals(morning, RoutineSchedule.claimDue(routines,
+                LocalDateTime.parse("2026-10-27T07:00"), runs, (id, date) -> true));
+    }
+
+    @Test
+    public void oneRoutineClaimDoesNotBlockAnotherRoutine() {
+        java.util.Map<String, LocalDate> runs = new java.util.HashMap<>();
+        runs.put("morning", LocalDate.parse("2026-10-30"));
+        assertEquals(friday, RoutineSchedule.claimDue(routines,
+                LocalDateTime.parse("2026-10-30T18:00"), runs,
+                (id, date) -> !date.equals(runs.get(id))));
+    }
+
+    @Test
+    public void failedPersistentClaimDoesNotStartPlayback() {
+        assertNull(RoutineSchedule.claimDue(routines, LocalDateTime.parse("2026-10-26T07:00"),
+                Collections.emptyMap(), (id, date) -> false));
+    }
+
+    @Test
     public void disabledIsNotDue() {
         morning.enabled = false;
         assertNull(due("2026-10-26T07:00"));

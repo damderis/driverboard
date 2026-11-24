@@ -39,6 +39,7 @@ public final class BoardEditorActivity extends AppCompatActivity {
     private final Map<String, ArrayDeque<String>> undo = new HashMap<>();
     private final Map<String, ArrayDeque<String>> redo = new HashMap<>();
     private String mode = Store.FULL;
+    private int page;
     private BoardLayout layout;
     private BoardLayout.Card selected;
     private String gestureBefore;
@@ -73,7 +74,8 @@ public final class BoardEditorActivity extends AppCompatActivity {
         String requested = state == null ? getIntent().getStringExtra(EXTRA_MODE)
                 : state.getString(EXTRA_MODE);
         mode = Store.SPLIT.equals(requested) ? Store.SPLIT : Store.FULL;
-        layout = Store.layout(this, mode);
+        page = state == null ? Store.page(this) : state.getInt("editor_page");
+        layout = Store.layout(this, mode, page);
         ink = color(com.google.android.material.R.attr.colorOnSurface);
         muted = color(com.google.android.material.R.attr.colorOnSurfaceVariant);
         surface = color(com.google.android.material.R.attr.colorSurface);
@@ -85,6 +87,7 @@ public final class BoardEditorActivity extends AppCompatActivity {
     @Override
     protected void onSaveInstanceState(Bundle state) {
         state.putString(EXTRA_MODE, mode);
+        state.putInt("editor_page", page);
         super.onSaveInstanceState(state);
     }
 
@@ -196,6 +199,13 @@ public final class BoardEditorActivity extends AppCompatActivity {
         controls.setPadding(dp(16), 0, dp(16), dp(8));
         root.addView(controls, new LinearLayout.LayoutParams(-1, dp(60)));
         addModeSelector(controls);
+        MaterialButton pageButton = textButton(Store.PAGE_NAMES[page]);
+        pageButton.setOnClickListener(view -> {
+            page = (page + 1) % Store.PAGE_NAMES.length;
+            pageButton.setText(Store.PAGE_NAMES[page]);
+            reload();
+        });
+        controls.addView(pageButton);
         MaterialButton reset = textButton(R.string.editor_reset);
         reset.setOnClickListener(view -> confirmReset());
         controls.addView(reset);
@@ -289,8 +299,17 @@ public final class BoardEditorActivity extends AppCompatActivity {
     private void switchMode(String next) {
         if (next.equals(mode)) return;
         mode = next;
+        reload();
+    }
+
+    // History stacks are keyed by mode+page so undo never crosses pages.
+    private String historyKey() {
+        return mode + page;
+    }
+
+    private void reload() {
         selected = null;
-        layout = Store.layout(this, mode);
+        layout = Store.layout(this, mode, page);
         board.setMode(mode);
         board.setEditorLayout(layout);
         board.selectCard(null);
@@ -314,25 +333,25 @@ public final class BoardEditorActivity extends AppCompatActivity {
     private void commit(String before) {
         String after = layout.toJson();
         if (before.equals(after)) return;
-        ArrayDeque<String> stack = undo.computeIfAbsent(mode, key -> new ArrayDeque<>());
+        ArrayDeque<String> stack = undo.computeIfAbsent(historyKey(), key -> new ArrayDeque<>());
         stack.push(before);
         while (stack.size() > HISTORY_LIMIT) stack.removeLast();
-        redo.computeIfAbsent(mode, key -> new ArrayDeque<>()).clear();
+        redo.computeIfAbsent(historyKey(), key -> new ArrayDeque<>()).clear();
         persist();
         updateHistoryButtons();
     }
 
     private void persist() {
-        Store.prefs(this).edit().putString(Store.layoutKey(mode), layout.toJson()).apply();
+        Store.prefs(this).edit().putString(Store.layoutKey(mode, page), layout.toJson()).apply();
         board.setEditorLayout(layout);
         board.selectCard(selected);
     }
 
     private void historyStep(Map<String, ArrayDeque<String>> from,
             Map<String, ArrayDeque<String>> to) {
-        ArrayDeque<String> source = from.get(mode);
+        ArrayDeque<String> source = from.get(historyKey());
         if (source == null || source.isEmpty()) return;
-        to.computeIfAbsent(mode, key -> new ArrayDeque<>()).push(layout.toJson());
+        to.computeIfAbsent(historyKey(), key -> new ArrayDeque<>()).push(layout.toJson());
         layout = BoardLayout.fromJson(source.pop(), Store.SPLIT.equals(mode));
         selected = null;
         board.selectCard(null);
@@ -342,8 +361,8 @@ public final class BoardEditorActivity extends AppCompatActivity {
     }
 
     private void updateHistoryButtons() {
-        undoButton.setEnabled(undo.containsKey(mode) && !undo.get(mode).isEmpty());
-        redoButton.setEnabled(redo.containsKey(mode) && !redo.get(mode).isEmpty());
+        undoButton.setEnabled(undo.containsKey(historyKey()) && !undo.get(historyKey()).isEmpty());
+        redoButton.setEnabled(redo.containsKey(historyKey()) && !redo.get(historyKey()).isEmpty());
     }
 
     private void confirmReset() {
@@ -353,8 +372,7 @@ public final class BoardEditorActivity extends AppCompatActivity {
                 .setNegativeButton(R.string.cancel_action, null)
                 .setPositiveButton(R.string.reset_action, (dialog, which) -> {
                     String before = layout.toJson();
-                    layout = Store.SPLIT.equals(mode)
-                            ? BoardLayout.splitDefaults() : BoardLayout.defaults();
+                    layout = BoardLayout.pageDefaults(page, Store.SPLIT.equals(mode));
                     selected = null;
                     board.selectCard(null);
                     persist();

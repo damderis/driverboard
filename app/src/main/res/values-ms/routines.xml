@@ -1,6 +1,9 @@
 <resources>
     <string name="routine_title">Rutin Quran</string>
-    <string name="routine_help">Bermula 8 saat selepas kereta disambungkan. Masa mengikut waktu tempatan.</string>
+    <string name="routine_help">Setiap rutin bermula secara automatik sekali sahaja setiap hari, 8 saat selepas kereta disambungkan. Sambungan semula tidak akan memulakannya lagi. Masa mengikut waktu tempatan. Main sekarang sentiasa tersedia.</string>
+    <string name="routine_daily_help">Satu permulaan automatik bagi setiap rutin setiap hari</string>
+    <string name="routine_manage">Urus</string>
+    <string name="routine_manage_description">Urus rutin Quran</string>
     <string name="routine_morning">Rutin pagi</string>
     <string name="routine_friday">Jumaat petang</string>
     <string name="routine_add">Tambah rutin</string>

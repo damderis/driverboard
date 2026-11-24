@@ -9,7 +9,18 @@ import java.util.Map;
 
 /** Local wall-clock scheduling, independent of Android. */
 public final class RoutineSchedule {
+    interface DailyRunClaim {
+        boolean claim(String routineId, LocalDate date);
+    }
+
     private RoutineSchedule() {}
+
+    /** Selects and persistently claims a daily automatic run before playback is attempted. */
+    public static Routine claimDue(List<Routine> routines, LocalDateTime now,
+            Map<String, LocalDate> lastRuns, DailyRunClaim claim) {
+        Routine selected = due(routines, now, lastRuns);
+        return selected != null && claim.claim(selected.id, now.toLocalDate()) ? selected : null;
+    }
 
     public static Routine due(List<Routine> routines, LocalDateTime now,
             Map<String, LocalDate> lastRuns) {
