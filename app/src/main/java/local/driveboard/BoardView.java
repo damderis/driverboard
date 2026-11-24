@@ -55,9 +55,6 @@ public final class BoardView extends View {
     private RectF drawnControlBounds;
     private final Handler controlHandler = new Handler(
             Looper.getMainLooper());
-    private final boolean offscreen;
-    private final Handler ownerHandler;
-    private boolean disposed;
     private final MediaController.Callback controlCallback =
             new MediaController.Callback() {
                 @Override
@@ -137,7 +134,7 @@ public final class BoardView extends View {
     private final Map<String, StaticLayout> quranLayouts = new HashMap<>();
 
     public boolean isQuranTransitioning() {
-        return !offscreen && lyricsVisible && media != null && displayedQuran != null
+        return lyricsVisible && media != null && displayedQuran != null
                 && outgoingQuran != null
                 && SystemClock.uptimeMillis() - quranTransitionAt < 320;
     }
@@ -214,53 +211,8 @@ public final class BoardView extends View {
     };
 
     public BoardView(Context c) {
-        this(c, false);
-    }
-
-    /** A detached renderer confined to the constructing thread's Looper. */
-    public BoardView(Context c, boolean offscreen) {
         super(c);
-        this.offscreen = offscreen;
-        ownerHandler = new Handler(Looper.myLooper() == null
-                ? Looper.getMainLooper() : Looper.myLooper());
         refresh();
-    }
-
-    public boolean hasQuranDocument() {
-        return quranDocument != null && media != null && media.quran != null
-                && quranDocument.surah == media.quran.surah.number;
-    }
-
-    public void setQuranTranslation(String edition) {
-        String next = edition == null ? "en.sahih" : edition;
-        if (!next.equals(quranEdition)) setQuran(quranDocument, next);
-    }
-
-    /** Call on the renderer's owning thread before its Looper is stopped. */
-    public void disposeOffscreen() {
-        if (!offscreen || disposed) return;
-        disposed = true;
-        frameRequestHook = null;
-        releaseMediaControls();
-        ownerHandler.removeCallbacksAndMessages(null);
-        cancelLayoutTransition();
-        if (staticLayer != null && !staticLayer.isRecycled()) staticLayer.recycle();
-        staticLayer = null;
-        if (artworkTile != null && !artworkTile.isRecycled()) artworkTile.recycle();
-        artworkTile = null;
-        artworkTileSource = null;
-        clearLyricBlocks();
-        quranLayouts.clear();
-        background = null;
-        glassBackdrop = null;
-    }
-
-    private void onOwner(Runnable action) {
-        if (Looper.myLooper() != ownerHandler.getLooper()) {
-            ownerHandler.post(() -> { if (!disposed) action.run(); });
-        } else if (!disposed) {
-            action.run();
-        }
     }
 
     public void setEditing(boolean value, Runnable callback) {
@@ -419,7 +371,7 @@ public final class BoardView extends View {
 
     private void bindMediaControls() {
         MediaController next = media == null ? null : media.controller;
-        if (offscreen || frameRequestHook == null) {
+        if (frameRequestHook == null) {
             controlState = media == null ? null : media.playbackState;
             return;
         }
@@ -643,11 +595,11 @@ public final class BoardView extends View {
     }
 
     void onGlassBackdropReady() {
-        onOwner(() -> {
-            glassAlphas.clear();
-            invalidateStatic();
-            if (frameRequestHook != null) frameRequestHook.run();
-        });
+        glassAlphas.clear();
+        invalidateStatic();
+        if (frameRequestHook != null) {
+            frameRequestHook.run();
+        }
     }
 
     private void clearLyricBlocks() {
@@ -656,7 +608,7 @@ public final class BoardView extends View {
     }
 
     private void scheduleFrame() {
-        if (offscreen || disposed || frameScheduled || frameRequestHook != null || !isAttachedToWindow()
+        if (frameScheduled || frameRequestHook != null || !isAttachedToWindow()
                 || getVisibility() != VISIBLE) {
             return;
         }
@@ -743,7 +695,6 @@ public final class BoardView extends View {
     }
 
     public void refresh() {
-        if (disposed) return;
         if (dragging == null && !editorLayout) {
             layout = Store.layout(getContext(), mode);
         }
@@ -797,7 +748,7 @@ public final class BoardView extends View {
         if (quranDocument == null && !quranDocumentLoading
                 && SystemClock.elapsedRealtime() >= quranDocumentRetryAt) {
             quranDocumentLoading = true;
-            QuranRepository.request(getContext(), surah, result -> onOwner(() -> {
+            QuranRepository.request(getContext(), surah, result -> {
                 if (!documentKey.equals(quranDocumentKey)) return;
                 quranDocumentLoading = false;
                 quranDocumentRetryAt = result == null
@@ -806,7 +757,7 @@ public final class BoardView extends View {
                     setQuran(result, quranEdition);
                     if (frameRequestHook != null) frameRequestHook.run();
                 }
-            }));
+            });
         }
         String timingKey = surah + ":" + media.recitationId;
         if (!timingKey.equals(quranTimingKey)) {
@@ -818,7 +769,7 @@ public final class BoardView extends View {
         if (media.recitationId == 0 || quranTiming != null || quranTimingLoading
                 || SystemClock.elapsedRealtime() < quranTimingRetryAt) return;
         quranTimingLoading = true;
-        QuranTimingRepository.request(getContext(), media.recitationId, surah, result -> onOwner(() -> {
+        QuranTimingRepository.request(getContext(), media.recitationId, surah, result -> {
             if (!timingKey.equals(quranTimingKey)) return;
             quranTimingLoading = false;
             quranTiming = result;
@@ -826,7 +777,7 @@ public final class BoardView extends View {
                     ? SystemClock.elapsedRealtime() + 30_000 : Long.MAX_VALUE;
             updateQuranPosition(media);
             if (frameRequestHook != null) frameRequestHook.run();
-        }));
+        });
     }
 
     private float unit() {
@@ -858,7 +809,6 @@ public final class BoardView extends View {
     }
 
     private void prepareLayoutTransition(int oldWidth, int oldHeight) {
-        if (offscreen || disposed) return;
         if (oldWidth <= 0 || oldHeight <= 0 || lyricsVisible || editing) {
             return;
         }
@@ -1547,7 +1497,7 @@ public final class BoardView extends View {
                     displayedLyric = current;
                     lyricTransitionAt = now;
                 }
-                float t = offscreen ? 1f : Math.min(1f, (now - lyricTransitionAt) / 320f);
+                float t = Math.min(1f, (now - lyricTransitionAt) / 320f);
                 float eased = 1f - (1f - t) * (1f - t) * (1f - t);
                 float travel = Math.min(18f * unit(), lyricArea.height() * .18f);
                 if (outgoingLyric >= 0 && t < 1f) {
@@ -1645,8 +1595,7 @@ public final class BoardView extends View {
                     colours.onSurface, false, 1);
             return;
         }
-        float t = offscreen ? 1f
-                : Math.min(1f, (SystemClock.uptimeMillis() - quranTransitionAt) / 320f);
+        float t = Math.min(1f, (SystemClock.uptimeMillis() - quranTransitionAt) / 320f);
         float eased = 1f - (1f - t) * (1f - t) * (1f - t);
         float travel = Math.min(18f * unit(), area.height() * .18f);
         if (outgoingQuran != null && t < 1f) {

@@ -46,6 +46,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final int PICK_BACKGROUND = 20;
+    private static final int REQUEST_PARKED_LOCATION = 8;
     private final ExecutorService pictureWorker = Executors.newSingleThreadExecutor();
     private ImageView backgroundThumbnail;
     private TextView backgroundPlaceholder;
@@ -92,6 +93,9 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     });
     private TextView allowed;
     private MaterialButton grant;
+    private TextView parkedLocationStatus;
+    private MaterialButton parkedLocationGrant;
+    private boolean parkedLocationDenied;
     private int ink;
     private int muted;
     private int cardColor;
@@ -188,6 +192,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         settingsCard.addView(card);
         content.addView(settingsCard, new LinearLayout.LayoutParams(-1, -2));
         addPrayerRow(card);
+        addParkedDetectionRow(card);
         addMediaRow(card);
         addWeatherRow(card);
         addBackgroundRow(card);
@@ -237,10 +242,6 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         content.addView(preview, previewParams);
         board.addOnLayoutChangeListener((view, left, top, right, bottom,
                 oldLeft, oldTop, oldRight, oldBottom) -> updateAspect());
-
-        TextView artworkNote = text(getString(R.string.board_artwork_note), 13, false);
-        artworkNote.setTextColor(muted);
-        content.addView(artworkNote, new LinearLayout.LayoutParams(-1, -2));
 
         MaterialButton edit = pill(getString(R.string.board_edit_action));
         edit.setOnClickListener(view -> startActivity(new Intent(this,
@@ -352,6 +353,50 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         grant.setOnClickListener(view -> startActivity(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         media.addView(grant);
+    }
+
+    private void addParkedDetectionRow(LinearLayout card) {
+        LinearLayout parked = row(card, true);
+        parked.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout description = column();
+        description.addView(text(getString(R.string.parked_detection), 15, true));
+        parked.addView(description, new LinearLayout.LayoutParams(-1, -2));
+        parkedLocationStatus = detail(description, "");
+        parkedLocationGrant = pill(getString(R.string.parked_permission_grant));
+        LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-2, dp(48));
+        action.topMargin = dp(8);
+        parked.addView(parkedLocationGrant, action);
+        parkedLocationGrant.setOnClickListener(view -> requestParkedLocationPermission());
+    }
+
+    private void requestParkedLocationPermission() {
+        if (hasParkedLocationPermission()) {
+            parkedLocationDenied = false;
+            updateParkedLocationState();
+            return;
+        }
+        parkedLocationDenied = false;
+        requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PARKED_LOCATION);
+    }
+
+    private boolean hasParkedLocationPermission() {
+        return checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void updateParkedLocationState() {
+        boolean granted = hasParkedLocationPermission();
+        int state = granted ? R.string.parked_permission_granted
+                : parkedLocationDenied ? R.string.parked_permission_denied
+                : R.string.browser_permission_needed;
+        parkedLocationStatus.setText(getString(state));
+        parkedLocationGrant.setText(granted
+                ? R.string.parked_permission_granted : R.string.parked_permission_grant);
+        parkedLocationGrant.setEnabled(!granted);
+        parkedLocationGrant.setAlpha(granted ? 0.6f : 1f);
     }
 
     private void addWeatherRow(LinearLayout card) {
@@ -679,6 +724,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         boolean access = WidgetData.hasMediaAccess(this);
         allowed.setVisibility(access ? View.VISIBLE : View.GONE);
         grant.setVisibility(access ? View.GONE : View.VISIBLE);
+        updateParkedLocationState();
         SharedPreferences prefs = Store.prefs(this);
         long backgroundVersion = prefs.getLong("background_at", 0);
         if (thumbnailVersion != backgroundVersion) {
@@ -757,6 +803,11 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     @Override
     public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
+        if (request == REQUEST_PARKED_LOCATION) {
+            parkedLocationDenied = !hasParkedLocationPermission();
+            updateParkedLocationState();
+            return;
+        }
         if (request == 7) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
                 locate();

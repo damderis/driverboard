@@ -176,7 +176,7 @@ public final class WidgetData {
             PlaybackState resumableState = null;
             for (MediaController controller : manager.getActiveSessions(
                     new ComponentName(c, MediaAccessService.class))) {
-                if (!ArtworkPolicy.allowed(c.getPackageName(), controller.getPackageName(), controller.getTag())) {
+                if (c.getPackageName().equals(controller.getPackageName())) {
                     continue;
                 }
                 PlaybackState state = controller.getPlaybackState();
@@ -454,7 +454,7 @@ public final class WidgetData {
             MediaSessionManager m = c.getSystemService(MediaSessionManager.class);
             for (MediaController controller : m.getActiveSessions(
                     new ComponentName(c, MediaAccessService.class))) {
-                if (!ArtworkPolicy.allowed(c.getPackageName(), controller.getPackageName(), controller.getTag())) {
+                if (c.getPackageName().equals(controller.getPackageName())) {
                     continue;
                 }
                 PlaybackState state = controller.getPlaybackState();
