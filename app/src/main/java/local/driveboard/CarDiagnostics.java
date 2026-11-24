@@ -97,7 +97,7 @@ public final class CarDiagnostics extends Application {
     public static void log(Context context, String message) {
         try {
             synchronized (LOCK) {
-                File file = new File(context.getFilesDir(), "car-diagnostics.log");
+                File file = new File(context.getExternalFilesDir(null) != null ? context.getExternalFilesDir(null) : context.getFilesDir(), "car-diagnostics.log");
                 byte[] bytes = (new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
                         .format(new Date()) + " " + message + "\n").getBytes(StandardCharsets.UTF_8);
                 if (file.length() + bytes.length > 256 * 1024) {

@@ -2,7 +2,19 @@ plugins { id 'com.android.application' }
 android {
     namespace 'local.driveboard'
     compileSdk 36
-    defaultConfig { applicationId 'local.driveboard'; minSdk 31; targetSdk 36; versionCode 1; versionName '1.0' }
+    defaultConfig { applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 1; versionName '1.0' }
+    signingConfigs {
+        // Play upload key; path and passwords live in ~/.gradle/gradle.properties, never in the repo.
+        release {
+            if (project.hasProperty('DRIVEBOARD_UPLOAD_STORE')) {
+                storeFile file(DRIVEBOARD_UPLOAD_STORE)
+                storePassword DRIVEBOARD_UPLOAD_PASSWORD
+                keyAlias 'upload'
+                keyPassword DRIVEBOARD_UPLOAD_PASSWORD
+            }
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 dependencies {
