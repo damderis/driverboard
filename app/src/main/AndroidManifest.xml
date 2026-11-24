@@ -16,7 +16,8 @@
         <activity android:name=".BoardEditorActivity" android:exported="false"
             android:screenOrientation="landscape" />
         <service android:name=".QuranMediaService" android:exported="true" android:label="@string/app_name" android:icon="@drawable/ic_driveboard"><intent-filter><action android:name="android.media.browse.MediaBrowserService"/></intent-filter></service>
-        <service android:name=".DriveBoardService" android:exported="true">
+        <!-- Off: AA 18.x never lists sideloaded template apps, and it would hide the media entry. -->
+        <service android:name=".DriveBoardService" android:exported="true" android:enabled="false">
             <intent-filter><action android:name="androidx.car.app.CarAppService"/><category android:name="androidx.car.app.category.NAVIGATION"/></intent-filter>
         </service>
         <service android:name=".MediaAccessService" android:label="@string/media_service_name" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
