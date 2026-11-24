@@ -2,6 +2,8 @@ package local.driveboard;
 
 import android.app.Application;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.car.app.connection.CarConnection;
 
@@ -18,6 +20,9 @@ import java.util.Locale;
 public final class CarDiagnostics extends Application {
     private static final Object LOCK = new Object();
     private static boolean installed;
+    private final Handler resumeHandler = new Handler(Looper.getMainLooper());
+    private final QuranMediaPolicy.ResumeGate resumeGate = new QuranMediaPolicy.ResumeGate();
+    private int connectionGeneration;
     private int carConnectionType = CarConnection.CONNECTION_TYPE_NOT_CONNECTED;
 
     @Override
@@ -33,11 +38,31 @@ public final class CarDiagnostics extends Application {
             }
             int previous = carConnectionType;
             carConnectionType = type;
-            if (type == CarConnection.CONNECTION_TYPE_PROJECTION && type != previous) {
-                RoutinePlayer.get(this).onCarStarted();
+            boolean projection = type == CarConnection.CONNECTION_TYPE_PROJECTION;
+            if (resumeGate.connectionChanged(projection)) {
+                int generation = ++connectionGeneration;
+                resumeHandler.postDelayed(() -> {
+                    if (generation != connectionGeneration) {
+                        return;
+                    }
+                    try {
+                        boolean playing = QuranPhone.isPlayingWithProgress(this);
+                        boolean enabled = Store.prefs(this).getBoolean("quran_auto_resume", true);
+                        if (resumeGate.claim(enabled, playing)) {
+                            CarDiagnostics.log(this, "QuranMedia car-connect resume");
+                            QuranPhone.play(this);
+                        } else {
+                            CarDiagnostics.log(this, "QuranMedia car-connect skipped enabled="
+                                    + enabled + " playing=" + playing);
+                        }
+                    } catch (RuntimeException error) {
+                        CarDiagnostics.log(this, "QuranMedia car-connect failed " + error);
+                    }
+                }, 8000);
             } else if (previous == CarConnection.CONNECTION_TYPE_PROJECTION
                     && type != previous) {
-                RoutinePlayer.get(this).onCarDisconnected();
+                connectionGeneration++;
+                resumeHandler.removeCallbacksAndMessages(null);
             }
         });
     }

@@ -198,7 +198,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addBackgroundRow(card);
         addColoursRow(card);
         addLanguageRow(card);
-        addRoutinesRow(card);
+        addQuranResumeRow(card);
         addFooter(content);
 
         setContentView(scroll);
@@ -559,15 +559,16 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         chips.check(selectedId);
     }
 
-    private void addRoutinesRow(LinearLayout card) {
-        LinearLayout routines = row(card, true);
-        LinearLayout description = description(routines, R.string.routine_title);
-        detail(description, getString(R.string.routine_daily_help));
-        MaterialButton manage = textButton(R.string.routine_manage);
-        manage.setContentDescription(getString(R.string.routine_manage_description));
-        manage.setOnClickListener(view -> startActivity(new Intent(this,
-                RoutineSettingsActivity.class)));
-        routines.addView(manage);
+    private void addQuranResumeRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        LinearLayout label = description(item, R.string.quran_auto_resume);
+        detail(label, getString(R.string.quran_auto_resume_help));
+        MaterialSwitch toggle = new MaterialSwitch(this);
+        toggle.setContentDescription(getString(R.string.quran_auto_resume));
+        toggle.setChecked(Store.prefs(this).getBoolean("quran_auto_resume", true));
+        toggle.setOnCheckedChangeListener((button, checked) ->
+                Store.prefs(this).edit().putBoolean("quran_auto_resume", checked).apply());
+        item.addView(toggle);
     }
 
     private void addLanguageRow(LinearLayout card) {

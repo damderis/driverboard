@@ -983,6 +983,10 @@ public final class BoardScreen extends Screen {
     static void launchShortcut(CarContext context, String action) {
         CarDiagnostics.log(context, "Shortcut " + action);
         String app = action.substring(action.indexOf(':') + 1);
+        if (QuranMediaPolicy.PACKAGE.equals(app)) {
+            QuranPhone.play(context);
+            return;
+        }
         try {
             // Android Auto refuses to open other apps from a car app, and both Quran and Morphe
             // reject outside controller connections. A PLAY media key reaches either player.
