@@ -115,8 +115,11 @@ public class BoardLayoutTest {
                 positions(BoardLayout.narrowDefaults(true, split)));
         split.cards.set(2, new BoardLayout.Card("media", 6, 3, 6, 3));
         assertEquals(split.toJson(), BoardLayout.fromJson(split.toJson(), true).toJson());
-        assertEquals("media", BoardLayout.narrowDefaults(true, split).cards.get(2).type);
-        assertEquals("media", BoardLayout.narrowDefaults(false, split).cards.get(2).type);
+        // With a music card: prayer on top, music in the middle, the remaining card at the bottom.
+        assertEquals("prayer:0,0,12,2;media:0,2,12,3;clock:0,5,12,1",
+                positions(BoardLayout.narrowDefaults(true, split)));
+        assertEquals("prayer:0,0,12,2;media:0,2,12,3;clock:0,5,12,1",
+                positions(BoardLayout.narrowDefaults(false, split)));
     }
 
     @Test

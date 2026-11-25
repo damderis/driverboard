@@ -3,7 +3,11 @@ android {
     namespace 'local.driveboard'
     compileSdk 36
     buildFeatures { buildConfig true }
-    defaultConfig { applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 4; versionName '1.3' }
+    defaultConfig {
+        applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 5; versionName '1.4'
+        buildConfigField 'boolean', 'WEATHER_MODE', 'true'
+        manifestPlaceholders = [carAppCategory: 'androidx.car.app.category.WEATHER', carTemplatePermission: 'androidx.car.app.MAP_TEMPLATES']
+    }
     signingConfigs {
         // Play upload key; path and passwords live in ~/.gradle/gradle.properties, never in the repo.
         release {

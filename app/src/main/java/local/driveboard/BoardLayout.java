@@ -230,10 +230,18 @@ public final class BoardLayout {
         Card media = findType(split, "media");
         Card weather = findType(split, "weather");
         BoardLayout b = new BoardLayout();
+        // Beside Android Auto's panel the side card usually shows the map, so music lives on the
+        // board; the clock is already in Android Auto's status bar.
+        if (media != null) {
+            if (prayer != null) b.cards.add(derived(prayer, 0, 0, 12, 2));
+            b.cards.add(derived(media, 0, 2, 12, 3));
+            Card bottom = weather != null ? weather : clock;
+            if (bottom != null) b.cards.add(derived(bottom, 0, 5, 12, 1));
+            return b;
+        }
         if (prayer != null) b.cards.add(derived(prayer, 0, 0, 12, 3));
         if (clock != null) b.cards.add(derived(clock, 0, 3, 12, 2));
-        Card bottom = playing && media != null ? media : weather != null ? weather : media;
-        if (bottom != null) b.cards.add(derived(bottom, 0, 5, 12, 1));
+        if (weather != null) b.cards.add(derived(weather, 0, 5, 12, 1));
         return b;
     }
 

@@ -1,6 +1,8 @@
 # DriveBoard
 
-Personal Android Auto board for a Proton e.MAS, with a native Java phone layout editor. Android 12+; package `local.driveboard`. This sideloaded navigation-surface prototype is not a production navigation app or a claim of Play eligibility.
+Personal Android Auto board for a Proton e.MAS, with a native Java phone layout editor. Android 12+; application ID `com.aai.driverboard` (debug: `.dev`). Version 1.4, versionCode 5. This sideloaded weather-category surface prototype is not a claim of Play eligibility.
+
+All builds declare `androidx.car.app.category.WEATHER`, `MAP_TEMPLATES` and `ACCESS_SURFACE`, without `NAVIGATION_TEMPLATES`; `-PweatherDev` is no longer needed. Android Auto shows the navigation app's live map in its side panel beside non-navigation apps: round 28 verified Google Maps' live route beside DriveBoard in the DHU. DriveBoard does not own or replace that route. On Car App API 7+, `MapWithContentTemplate` pairs the board's stable surface area with a shortcut `GridTemplate`. Older hosts receive a standalone shortcut grid without surface drawing. Both paths are logged. The host grid replaces the duplicate prayer list and top shortcut strip; page arrows remain on the map. Weather/map permission and content-template rules: [weather apps](https://developer.android.com/training/cars/apps/weather), [MapWithContentTemplate](https://developer.android.com/reference/androidx/car/app/navigation/model/MapWithContentTemplate), [GridTemplate](https://developer.android.com/reference/androidx/car/app/model/GridTemplate).
 
 ## Features
 
@@ -14,17 +16,16 @@ Personal Android Auto board for a Proton e.MAS, with a native Java phone layout 
 
 JDK 17, Gradle wrapper 9.3.1, AGP 8.12.0, Android SDK 36, AndroidX Car App 1.7.0. Set `sdk.dir` in ignored `local.properties`.
 
-Always build with `ANDROID_USER_HOME` set to this workspace's `.android` directory so the project-local debug key matches the installed app's signature.
+Build using the normal Android and Gradle user homes, without `ANDROID_USER_HOME` or `GRADLE_USER_HOME` overrides. No device installation is part of this workflow.
 
 ```powershell
-$env:GRADLE_USER_HOME="$PWD\.gradle-user-home"
-$env:ANDROID_USER_HOME="$PWD\.android"
-.\gradlew.bat test assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -W -n local.driveboard/.MainActivity
+.\gradlew.bat test assembleDebug -PminifyDev -q
+.\gradlew.bat bundleRelease -q
 ```
 
 Enable Unknown sources in Android Auto developer settings yourself, then connect and select DriveBoard. The development service accepts installed hosts using `ALLOW_ALL_HOSTS_VALIDATOR`; restrict signatures before distributing it.
+
+Round 29 DHU checks: swipe to show Google Maps' live route in the side panel; check that the board stays beside the shortcut panel without a blank top band at full/split sizes. Check Media/Board, Lyrics/Lirik, Web, YouTube and conditional Audio Switch Controls tiles in EN/BM, including return to Board and map page arrows. Nearest mosque/Masjid terdekat should hand `geo:0,0?q=masjid` to the default navigation app. Verify `600 m` and `1.2 km` appear only as the navigation headline, with the turn instruction beneath. Verify YouTube remains locked while moving/unknown and unlocks only when parked. On a host below API 7, verify the logged standalone-grid fallback and absence of surface drawing.
 
 ## Browser and parked detection
 
