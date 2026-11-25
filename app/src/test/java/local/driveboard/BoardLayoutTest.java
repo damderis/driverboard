@@ -111,7 +111,7 @@ public class BoardLayoutTest {
         assertEquals("split", BoardLayout.modeFor(1399, 1000));
         assertEquals("full", BoardLayout.modeFor(1400, 1000));
         BoardLayout split = BoardLayout.splitDefaults();
-        assertEquals("prayer:0,0,12,3;clock:0,3,12,2;weather:0,5,12,1",
+        assertEquals("prayer:0,0,12,2;media:0,2,12,3;weather:0,5,12,1",
                 positions(BoardLayout.narrowDefaults(true, split)));
         split.cards.set(2, new BoardLayout.Card("media", 6, 3, 6, 3));
         assertEquals(split.toJson(), BoardLayout.fromJson(split.toJson(), true).toJson());
@@ -245,10 +245,11 @@ public class BoardLayoutTest {
         BoardLayout.Card clock = split.add("clock", 0, 0);
         clock.options.put("format", "12h");
         BoardLayout narrow = BoardLayout.narrowDefaults(false, split);
-        assertEquals(1, narrow.cards.size());
-        assertEquals(clock.id, narrow.cards.get(0).id);
-        assertEquals("12h", narrow.cards.get(0).options.get("format"));
-        assertEquals("clock:0,3,12,2", position(narrow.cards.get(0)));
+        assertEquals(2, narrow.cards.size());
+        assertEquals("media", narrow.cards.get(0).type);
+        assertEquals(clock.id, narrow.cards.get(1).id);
+        assertEquals("12h", narrow.cards.get(1).options.get("format"));
+        assertEquals("clock:0,5,12,1", position(narrow.cards.get(1)));
 
         String unknown = split.toJson().replace("\"cards\":[", "\"cards\":["
                 + "{\"id\":\"future-1\",\"type\":\"future\",\"col\":0,"
