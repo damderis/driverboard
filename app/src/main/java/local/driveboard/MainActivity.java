@@ -202,6 +202,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addParkedDetectionRow(card);
         addMediaRow(card);
         addNavigationRow(card);
+        addNavAppRow(card);
         addWeatherRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
@@ -458,6 +459,46 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
             board.refresh();
         });
         item.addView(toggle);
+    }
+
+    // Navigation apps DriveBoard Peta's Home / Charging / Mosque tiles can send a route to.
+    static final String[] NAV_APPS = {"", "my.peta.maps", "com.google.android.apps.maps", "com.waze"};
+    private static final String[] NAV_APP_NAMES = {"", "Peta", "Google Maps", "Waze"};
+
+    private String navAppName(String pkg) {
+        for (int i = 1; i < NAV_APPS.length; i++) if (NAV_APPS[i].equals(pkg)) return NAV_APP_NAMES[i];
+        return getString(R.string.nav_app_auto);
+    }
+
+    private void addNavAppRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        LinearLayout labels = column();
+        labels.addView(text(getString(R.string.nav_app), 15, true));
+        TextView chosen = detail(labels, navAppName(Store.prefs(this).getString("nav_app", "")));
+        item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        item.setOnClickListener(view -> {
+            java.util.List<String> packages = new java.util.ArrayList<>();
+            java.util.List<String> names = new java.util.ArrayList<>();
+            for (int i = 0; i < NAV_APPS.length; i++) {
+                if (i > 0) {
+                    try {
+                        getPackageManager().getPackageInfo(NAV_APPS[i], 0);
+                    } catch (android.content.pm.PackageManager.NameNotFoundException missing) {
+                        continue;
+                    }
+                }
+                packages.add(NAV_APPS[i]);
+                names.add(i == 0 ? getString(R.string.nav_app_auto) : NAV_APP_NAMES[i]);
+            }
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.nav_app)
+                    .setItems(names.toArray(new String[0]), (dialog, index) -> {
+                        Store.prefs(this).edit().putString("nav_app", packages.get(index)).apply();
+                        chosen.setText(names.get(index));
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        });
     }
 
     private void addParkedDetectionRow(LinearLayout card) {

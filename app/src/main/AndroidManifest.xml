@@ -10,6 +10,9 @@
     <queries>
         <package android:name="com.quran.labs.androidquran"/>
         <package android:name="app.morphe.android.apps.youtube.music"/>
+        <package android:name="my.peta.maps"/>
+        <package android:name="com.google.android.apps.maps"/>
+        <package android:name="com.waze"/>
         <provider android:authorities="local.audio.separator.carcontrol"/>
     </queries>
     <application android:name=".CarDiagnostics" android:theme="@style/Theme.DriveBoard" android:label="@string/app_name" android:icon="@drawable/ic_driveboard" android:allowBackup="false" android:supportsRtl="true">

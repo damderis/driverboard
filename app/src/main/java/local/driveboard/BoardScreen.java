@@ -610,9 +610,21 @@ public final class BoardScreen extends Screen {
     }
 
     private void navigateTo(String query) {
+        android.content.Intent intent = new android.content.Intent(CarContext.ACTION_NAVIGATE,
+                android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query)));
+        String app = prefs.getString("nav_app", "");
+        if (!app.isEmpty()) {
+            // The phone app's "Navigation app" choice; Android Auto may still route it elsewhere.
+            try {
+                getCarContext().startCarApp(new android.content.Intent(intent).setPackage(app));
+                CarDiagnostics.log(getCarContext(), "Navigate " + query + " via " + app);
+                return;
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Navigate via " + app + " refused: " + error);
+            }
+        }
         try {
-            getCarContext().startCarApp(new android.content.Intent(CarContext.ACTION_NAVIGATE,
-                    android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query))));
+            getCarContext().startCarApp(intent);
         } catch (RuntimeException error) {
             CarDiagnostics.log(getCarContext(), "Navigate " + query + " failed: " + error);
         }

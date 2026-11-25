@@ -31,6 +31,8 @@
 <string name="nearest_mosque">Nearest mosque</string>
     <string name="home">Home</string>
     <string name="charging_station">Charging</string>
+    <string name="nav_app">Navigation app</string>
+    <string name="nav_app_auto">Automatic (Android Auto picks)</string>
     <string name="home_query" translatable="false">Home</string>
     <string name="charging_query" translatable="false">EV charging station</string>
 <string name="browser_host_unsupported">This host needs car app API 7 or newer to show the browser.</string>

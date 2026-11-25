@@ -30,6 +30,8 @@
 <string name="nearest_mosque">Masjid terdekat</string>
     <string name="home">Rumah</string>
     <string name="charging_station">Pengecas</string>
+    <string name="nav_app">Aplikasi navigasi</string>
+    <string name="nav_app_auto">Automatik (Android Auto pilih)</string>
 <string name="browser_host_unsupported">Hos ini memerlukan API aplikasi kereta 7 atau lebih baharu untuk memaparkan pelayar.</string>
 <string name="surface_host_unsupported">Paparan ini memerlukan API aplikasi kereta 7 atau lebih baharu.</string>
 </resources>
