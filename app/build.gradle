@@ -4,7 +4,7 @@ android {
     compileSdk 36
     buildFeatures { buildConfig true }
     defaultConfig {
-        applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 5; versionName '1.4'
+        applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 6; versionName '1.5'
         buildConfigField 'boolean', 'WEATHER_MODE', 'true'
         manifestPlaceholders = [carAppCategory: 'androidx.car.app.category.WEATHER', carTemplatePermission: 'androidx.car.app.MAP_TEMPLATES']
     }

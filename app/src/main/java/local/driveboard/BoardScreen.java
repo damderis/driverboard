@@ -874,13 +874,15 @@ public final class BoardScreen extends Screen {
         // Android Auto reserves a left column for the weather template's panel but its card only
         // fills the top. Draw across the whole width and lay the board around that card.
         if (usesWeatherTemplate() && !lyricsVisible && stableArea.left > width * .25f) {
-            // ponytail: the host does not report its panel size; these fractions were measured on
-            // the 1920x1080 DHU (card at x 12..stableLeft-13 and y from 12, header 80px, 128px per grid row of
-            // two tiles). Re-measure if a head unit draws the panel differently.
-            float h = height;
+            // ponytail: the host does not report its panel size. Its grid tiles scale with the
+            // panel's width, so the height is estimated from that width: on the DHU a 415px-wide
+            // card had an 80px header and 128px per row of two tiles. The e.MAS 5 head unit draws
+            // the column 584px wide (DHU 440). The 5% slack keeps the weather card clear of it.
+            float margin = height * .0112f;
+            float cardWidth = stableArea.left - 2 * margin;
             int rows = (shortcutCount() + 1) / 2;
-            float panelBottom = h * .0112f + h * .0746f + rows * h * .1194f;
-            board.setPanelColumn(h * .0112f, stableArea.left - h * .0121f, h * .0112f,
+            float panelBottom = margin + cardWidth * (.193f + rows * .308f) * 1.05f;
+            board.setPanelColumn(margin, stableArea.left - margin, margin,
                     panelBottom, stableArea.left);
             drawArea.set(0, 0, width, height);
         } else {
