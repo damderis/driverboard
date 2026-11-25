@@ -54,7 +54,7 @@ public final class QuranPhone {
                     new ComponentName(context, MediaAccessService.class))) {
                 PlaybackState state = session.getPlaybackState();
                 if (QuranMediaPolicy.PACKAGE.equals(session.getPackageName()) && state != null
-                        && state.getState() == PlaybackState.STATE_PLAYING
+                        && WidgetData.isActive(state.getState())
                         && (state.getPosition() > 0 || state.getBufferedPosition() > 0)) {
                     return true;
                 }

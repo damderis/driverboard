@@ -162,6 +162,23 @@ public final class WidgetData {
 
     private static String lastSnapshotError;
 
+    /** Playing, or about to be: YouTube Music sits in BUFFERING for long stretches while streaming. */
+    public static boolean isActive(int state) {
+        switch (state) {
+            case PlaybackState.STATE_PLAYING:
+            case PlaybackState.STATE_BUFFERING:
+            case PlaybackState.STATE_CONNECTING:
+            case PlaybackState.STATE_FAST_FORWARDING:
+            case PlaybackState.STATE_REWINDING:
+            case PlaybackState.STATE_SKIPPING_TO_NEXT:
+            case PlaybackState.STATE_SKIPPING_TO_PREVIOUS:
+            case PlaybackState.STATE_SKIPPING_TO_QUEUE_ITEM:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public static MediaSnapshot mediaSnapshot(Context c) {
         Context lc = AppLocale.wrap(c);
         if (!hasMediaAccess(c)) {
@@ -242,7 +259,7 @@ public final class WidgetData {
         int firstWeakPlaying = -1;
         for (int i = 0; i < candidates.size(); i++) {
             MediaCandidate candidate = candidates.get(i);
-            boolean playing = candidate.state == PlaybackState.STATE_PLAYING;
+            boolean playing = WidgetData.isActive(candidate.state);
             boolean hasProgress = candidate.position > 0 || candidate.bufferedPosition > 0;
             if (playing && hasProgress) {
                 return i;
@@ -259,7 +276,7 @@ public final class WidgetData {
             boolean packageHasBetter = false;
             for (MediaCandidate candidate : candidates) {
                 if (samePackage(weakPackage, candidate.packageName)
-                        && ((candidate.state == PlaybackState.STATE_PLAYING
+                        && ((WidgetData.isActive(candidate.state)
                         && (candidate.position > 0 || candidate.bufferedPosition > 0))
                         || candidate.resumable)) {
                     packageHasBetter = true;
@@ -282,7 +299,7 @@ public final class WidgetData {
 
     private static MediaSnapshot snapshotOf(MediaController controller, PlaybackState state,
             Context lc) {
-        boolean playing = state.getState() == PlaybackState.STATE_PLAYING;
+        boolean playing = WidgetData.isActive(state.getState());
         MediaMetadata data = controller.getMetadata();
         if (data == null) {
             return new MediaSnapshot(lc.getString(R.string.media_playing), "\u2014", "", null,
@@ -365,7 +382,7 @@ public final class WidgetData {
             case MEDIA_NEXT:
                 return (actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0;
             case MEDIA_PLAY_PAUSE:
-                long required = state.getState() == PlaybackState.STATE_PLAYING
+                long required = WidgetData.isActive(state.getState())
                         ? PlaybackState.ACTION_PAUSE : PlaybackState.ACTION_PLAY;
                 return (actions & (required | PlaybackState.ACTION_PLAY_PAUSE)) != 0;
             default:
@@ -388,7 +405,7 @@ public final class WidgetData {
                 // Quran's car session ignores transport controls from other apps; media keys work.
                 int key = MEDIA_PREVIOUS.equals(action) ? KeyEvent.KEYCODE_MEDIA_PREVIOUS
                         : MEDIA_NEXT.equals(action) ? KeyEvent.KEYCODE_MEDIA_NEXT
-                        : state.getState() == PlaybackState.STATE_PLAYING
+                        : WidgetData.isActive(state.getState())
                         ? KeyEvent.KEYCODE_MEDIA_PAUSE : KeyEvent.KEYCODE_MEDIA_PLAY;
                 controller.dispatchMediaButtonEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
                 controller.dispatchMediaButtonEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
@@ -403,7 +420,7 @@ public final class WidgetData {
                     controls.skipToNext();
                     break;
                 case MEDIA_PLAY_PAUSE:
-                    boolean playing = state.getState() == PlaybackState.STATE_PLAYING;
+                    boolean playing = WidgetData.isActive(state.getState());
                     if (playing) {
                         controls.pause();
                     } else {
@@ -465,7 +482,7 @@ public final class WidgetData {
                     continue;
                 }
                 PlaybackState state = controller.getPlaybackState();
-                if (state == null || state.getState() != PlaybackState.STATE_PLAYING) {
+                if (state == null || !WidgetData.isActive(state.getState())) {
                     continue;
                 }
                 MediaMetadata data = controller.getMetadata();

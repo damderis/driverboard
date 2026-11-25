@@ -403,8 +403,7 @@ public final class BoardView extends View {
 
     private boolean controlPlaying() {
         return optimisticPlaying != null ? optimisticPlaying
-                : controlState != null && controlState.getState()
-                == PlaybackState.STATE_PLAYING;
+                : controlState != null && WidgetData.isActive(controlState.getState());
     }
 
     private static String controlAction(MediaControlLayout.Control control) {
@@ -436,7 +435,7 @@ public final class BoardView extends View {
             PlaybackState current = media == null || media.controller == null
                     ? null : media.controller.getPlaybackState();
             if (current != null) {
-                wasPlaying = current.getState() == PlaybackState.STATE_PLAYING;
+                wasPlaying = WidgetData.isActive(current.getState());
             }
         } catch (RuntimeException ignored) {
             // Dispatch below reports a disappeared session.
@@ -1725,14 +1724,20 @@ public final class BoardView extends View {
     private void drawLyricsArt(Canvas canvas, RectF bounds) {
         Bitmap art = mediaArtwork(Math.round(bounds.width()));
         Path shape = ExpressiveShapes.cookie(bounds);
-        paint.setColor(colours.surfaceContainerHighest);
+        paint.setColor(art == null ? colours.primaryContainer : colours.surfaceContainerHighest);
         paint.setStyle(Paint.Style.FILL);
         canvas.drawPath(shape, paint);
         if (art == null) {
-            text(canvas, "♫", bounds.left + bounds.width() * .34f,
-                    bounds.centerY() + bounds.height() * .15f,
-                    bounds.height() * .43f, SAGE,
-                    Fonts.semibold(getContext()), bounds.width() * .5f);
+            if (musicNote == null) {
+                musicNote = getContext().getDrawable(R.drawable.ic_music_note).mutate();
+            }
+            int half = Math.round(bounds.width() * .21f);
+            musicNote.setBounds(Math.round(bounds.centerX()) - half,
+                    Math.round(bounds.centerY()) - half,
+                    Math.round(bounds.centerX()) + half,
+                    Math.round(bounds.centerY()) + half);
+            musicNote.setTint(colours.onPrimaryContainer);
+            musicNote.draw(canvas);
             return;
         }
         BitmapShader shader = new BitmapShader(art,
@@ -2265,6 +2270,8 @@ public final class BoardView extends View {
         return artworkTile;
     }
 
+    private android.graphics.drawable.Drawable musicNote;
+
     void drawMedia(Canvas canvas, RectF r) {
         float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
         float artworkTop = r.centerY() - artworkSize / 2f;
@@ -2285,26 +2292,19 @@ public final class BoardView extends View {
             paint.setFilterBitmap(true);
             canvas.drawBitmap(artworkTile(art), null, artwork, paint);
         } else {
-            paint.setColor(colours.surfaceContainerHighest);
+            // Empty state: accent-tinted shape with the Material music note, not a grey placeholder.
+            paint.setColor(colours.primaryContainer);
             canvas.drawPath(artShape, paint);
-            float cx = artwork.centerX();
-            float cy = artwork.centerY();
-            paint.setColor(SAGE);
-            Path note = new Path();
-            note.moveTo(cx + artworkSize * .02f, cy - artworkSize * .23f);
-            note.lineTo(cx + artworkSize * .23f, cy - artworkSize * .28f);
-            note.lineTo(cx + artworkSize * .23f, cy + artworkSize * .10f);
-            note.lineTo(cx + artworkSize * .18f, cy + artworkSize * .10f);
-            note.lineTo(cx + artworkSize * .18f, cy - artworkSize * .17f);
-            note.lineTo(cx + artworkSize * .07f, cy - artworkSize * .14f);
-            note.lineTo(cx + artworkSize * .07f, cy + artworkSize * .17f);
-            note.lineTo(cx + artworkSize * .02f, cy + artworkSize * .17f);
-            note.close();
-            note.addCircle(cx - artworkSize * .04f, cy + artworkSize * .17f,
-                    artworkSize * .065f, Path.Direction.CW);
-            note.addCircle(cx + artworkSize * .17f, cy + artworkSize * .11f,
-                    artworkSize * .065f, Path.Direction.CW);
-            canvas.drawPath(note, paint);
+            if (musicNote == null) {
+                musicNote = getContext().getDrawable(R.drawable.ic_music_note).mutate();
+            }
+            int half = Math.round(artworkSize * .21f);
+            musicNote.setBounds(Math.round(artwork.centerX()) - half,
+                    Math.round(artwork.centerY()) - half,
+                    Math.round(artwork.centerX()) + half,
+                    Math.round(artwork.centerY()) + half);
+            musicNote.setTint(colours.onPrimaryContainer);
+            musicNote.draw(canvas);
         }
         float x = artwork.right + 10f * unit();
         float width = Math.max(1f, r.right - x);
@@ -2313,8 +2313,8 @@ public final class BoardView extends View {
         String artist = media == null || media.artist == null ? "" : media.artist;
         boolean playing = media != null && media.playing;
         boolean empty = media == null || media.controller == null;
-        float titleSize = Math.min(19f * unit(), r.height() * .19f) * .75f;
-        float artistSize = Math.min(13f * unit(), r.height() * .14f) * .80f;
+        float titleSize = Math.min(19f * unit(), r.height() * .19f) * .64f;
+        float artistSize = Math.min(13f * unit(), r.height() * .14f) * .70f;
         if (empty) {
             drawEmptyMediaText(canvas, new RectF(x, r.top, r.right, r.bottom),
                     titleSize, artistSize);
@@ -2385,11 +2385,11 @@ public final class BoardView extends View {
         int width = Math.max(1, Math.round(bounds.width()));
         StaticLayout heading = StaticLayout.Builder.obtain(title, 0, title.length(),
                         titlePaint, width)
-                .setIncludePad(false).setMaxLines(1)
+                .setIncludePad(false).setMaxLines(2)
                 .setEllipsize(TextUtils.TruncateAt.END).build();
         StaticLayout hint = StaticLayout.Builder.obtain(subtitle, 0, subtitle.length(),
                         subtitlePaint, width)
-                .setIncludePad(false).setMaxLines(1)
+                .setIncludePad(false).setMaxLines(2)
                 .setEllipsize(TextUtils.TruncateAt.END).build();
         float gap = artistSize * .30f;
         canvas.save();
@@ -2400,6 +2400,18 @@ public final class BoardView extends View {
         canvas.translate(0, heading.getHeight() + gap);
         hint.draw(canvas);
         canvas.restore();
+    }
+
+    private float waveLevel = 1f;
+    private long waveLevelAt;
+
+    /** Eases the wave height toward 1 while playing and 0 when paused, over about 300 ms. */
+    private float waveLevel(boolean playing) {
+        long now = SystemClock.uptimeMillis();
+        float step = waveLevelAt == 0 ? 1f : Math.min(1f, (now - waveLevelAt) / 300f);
+        waveLevelAt = now;
+        waveLevel += ((playing ? 1f : 0f) - waveLevel) * step;
+        return waveLevel;
     }
 
     private void drawProgress(Canvas canvas) {
@@ -2427,27 +2439,43 @@ public final class BoardView extends View {
                 canvas.saveLayerAlpha(bounds, Math.round(alpha * 255f));
             }
             canvas.clipPath(cardPath(card.type, bounds));
+            // M3 Expressive linear wavy indicator: fixed-size wave that tapers into the line at both
+            // ends, drifts while playing and flattens when paused, a gap, then the track and a stop dot.
+            float stroke = Math.max(1.5f, 2.5f * unit());
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Math.max(1.5f, r.height() * .015f));
+            paint.setStrokeWidth(stroke);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            float end = x + width * progress;
-            float gap = Math.max(3f * unit(), r.width() * .025f);
-            paint.setColor((BRASS & 0x00FFFFFF) | 0x4D000000);
-            float unplayedStart = progress <= 0f ? x : end + gap;
-            if (unplayedStart < r.right) {
-                canvas.drawLine(unplayedStart, lineY, r.right, lineY, paint);
+            float start = x + stroke / 2f;
+            float trackEnd = r.right - stroke / 2f;
+            float end = start + (trackEnd - start) * progress;
+            float gap = stroke * 1.6f;
+            float unplayedStart = progress <= 0f ? start : end + gap;
+            if (unplayedStart < trackEnd) {
+                paint.setColor((BRASS & 0x00FFFFFF) | 0x4D000000);
+                canvas.drawLine(unplayedStart, lineY, trackEnd, lineY, paint);
             }
+            paint.setStyle(Paint.Style.FILL);
             paint.setColor(BRASS);
-            Path wave = new Path();
-            wave.moveTo(x, lineY);
-            float step = Math.max(1f, r.width() * .01f);
-            for (float point = x + step; point < end; point += step) {
-                float phase = (point - x) / Math.max(1f, r.width() * .1f);
-                wave.lineTo(point, lineY + (float) Math.sin(phase * Math.PI * 2)
-                        * r.height() * .03f);
+            canvas.drawCircle(trackEnd, lineY, stroke / 2f, paint);
+            if (end > start) {
+                paint.setStyle(Paint.Style.STROKE);
+                float amplitude = stroke * 1.25f * waveLevel(media.playing);
+                float wavelength = 22f * unit();
+                float taper = wavelength * .5f;
+                float drift = media.playing ? (SystemClock.uptimeMillis() % 1600L) / 1600f : 0f;
+                Path wave = new Path();
+                wave.moveTo(start, lineY);
+                float step = Math.max(1f, unit());
+                for (float point = start + step; point < end; point += step) {
+                    float edge = Math.min(1f, Math.min(point - start, end - point) / taper);
+                    float envelope = edge * edge * (3f - 2f * edge);
+                    wave.lineTo(point, lineY + (float) Math.sin(
+                            ((point - start) / wavelength - drift) * Math.PI * 2)
+                            * amplitude * envelope);
+                }
+                wave.lineTo(end, lineY);
+                canvas.drawPath(wave, paint);
             }
-            wave.lineTo(end, lineY);
-            canvas.drawPath(wave, paint);
             paint.setStyle(Paint.Style.FILL);
             if (alpha < 1f) {
                 canvas.restore();
