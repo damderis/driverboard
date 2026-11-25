@@ -995,7 +995,7 @@ public final class BoardView extends View {
     public void refresh() {
         if (dragging == null && !editorLayout) {
             layout = panelColumn()
-                    ? BoardLayout.panelLayout(Store.layout(getContext(), Store.NARROW, 0))
+                    ? BoardLayout.panelLayout(Store.layout(getContext(), Store.SPLIT, 0))
                     : Store.layout(getContext(), mode);
         }
         updateNavigation();
