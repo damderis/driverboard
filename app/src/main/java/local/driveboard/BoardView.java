@@ -94,7 +94,8 @@ public final class BoardView extends View {
     private void drawNavigation(Canvas canvas) {
         updateNavigation();
         float alpha = navigationAlpha();
-        if (navigationState == null || alpha <= 0f || editing) {
+        // Split/narrow sit next to Android Auto's side panel, which shows the map's own route.
+        if (navigationState == null || alpha <= 0f || editing || !Store.FULL.equals(mode)) {
             navigationBounds.setEmpty();
             return;
         }
@@ -2322,14 +2323,22 @@ public final class BoardView extends View {
         float star = Math.min(28f * unit(), Math.max(10f * unit(), r.height() * .36f));
         star = Math.min(star, Math.min(r.width() * .15f, (limit - r.top) * .62f));
         float x = r.left;
-        if (next != null && r.width() >= star * 3.2f && r.height() >= star * 1.5f) {
-            drawStar(canvas, x + star / 2,
-                    r.top + (limit - r.top) / 2f, star, true);
-            x += star + Math.max(5f * unit(), star * .25f);
-        }
+        boolean showStar = next != null && r.width() >= star * 3.2f
+                && r.height() >= star * 1.5f;
+        if (showStar) x += star + Math.max(5f * unit(), star * .25f);
         float width = r.right - x;
         String title = next == null ? DASH : next.name;
         if (next == null) {
+            float stateTop = r.top;
+            if (!Store.FULL.equals(mode) && columns != 0) {
+                float groupGap = 14f * unit() * .6f;
+                float rowsHeight = rowHeight * (columns == 3 ? 2 : 1);
+                float headerHeight = Math.min(summaryHeight,
+                        Math.max(1f, r.height() - rowsHeight - groupGap));
+                stateTop = r.centerY() - (headerHeight + groupGap + rowsHeight) / 2f;
+                limit = stateTop + headerHeight;
+                rowTop = limit + groupGap;
+            }
             int message = prayer != null && "unavailable".equals(prayer.status)
                     ? R.string.prayer_unavailable
                     : prayer != null && "tomorrow_waiting".equals(prayer.status)
@@ -2340,7 +2349,7 @@ public final class BoardView extends View {
                         + (prayer.updated.isEmpty() ? "" : " \u00b7 "
                         + words.getString(R.string.board_updated, prayer.updated));
             }
-            stateText(canvas, stateMessage, new RectF(x, r.top, r.right, limit),
+            stateText(canvas, stateMessage, new RectF(x, stateTop, r.right, limit),
                     Math.min(16f * unit(), r.height() * .22f), stale ? DIM : SOFT);
             if (columns != 0) {
                 drawPrayerRows(canvas, r, rows, columns, rowTop,
@@ -2378,7 +2387,22 @@ public final class BoardView extends View {
             blockHeight = titleMetrics.descent - titleMetrics.ascent + gap
                     + countMetrics.descent - countMetrics.ascent;
         }
-        float titleY = r.top + (available - blockHeight) / 2f - titleMetrics.ascent;
+        float headerTop = r.top + (available - blockHeight) / 2f;
+        if (!Store.FULL.equals(mode) && columns != 0) {
+            float headerHeight = Math.max(blockHeight, showStar ? star : 0f);
+            float rowsHeight = rowHeight * (columns == 3 ? 2 : 1);
+            float groupGap = Math.min((titleMetrics.descent - titleMetrics.ascent) * .6f,
+                    Math.max(0f, r.height() - headerHeight - rowsHeight));
+            float groupTop = r.centerY() - (headerHeight + groupGap + rowsHeight) / 2f;
+            headerTop = groupTop + (headerHeight - blockHeight) / 2f;
+            rowTop = groupTop + headerHeight + groupGap;
+        }
+        if (showStar) {
+            drawStar(canvas, r.left + star / 2f,
+                    Store.FULL.equals(mode) ? r.top + available / 2f
+                    : headerTop + blockHeight / 2f, star, true);
+        }
+        float titleY = headerTop - titleMetrics.ascent;
         text(canvas, title, x, titleY, titleSize,
                 stale ? DIM : colours.onPrimaryContainer,
                 Fonts.semibold(getContext()), width);
