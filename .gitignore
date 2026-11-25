@@ -8,3 +8,9 @@ local.properties
 .impeccable/review/*.xml
 .impeccable/review/*.txt
 .impeccable/decision/*.txt
+
+# Review screenshots show personal location and apps; kept local only.
+.impeccable/**/*.png
+.impeccable/**/*.jpg
+.impeccable/**/*.jpeg
+.impeccable/**/*.webp
