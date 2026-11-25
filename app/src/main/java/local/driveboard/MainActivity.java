@@ -203,7 +203,9 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addMediaRow(card);
         addNavigationRow(card);
         addNavAppRow(card);
-        addHomeRow(card);
+        addPlaceRow(card, "home", R.string.home_address, R.string.home_not_set);
+        addPlaceRow(card, "work", R.string.work_address, R.string.work_not_set);
+        addPanelTilesRow(card);
         addWeatherRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
@@ -502,40 +504,91 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         });
     }
 
-    /** Home for DriveBoard Peta's Home tile: "lat,lng" or a typed address (pref "home"). */
-    private void addHomeRow(LinearLayout card) {
+    /** A saved place for the Home / Work tiles: "lat,lng" or a typed address (pref key). */
+    private void addPlaceRow(LinearLayout card, String key, int title, int notSet) {
         LinearLayout item = row(card, true);
         LinearLayout labels = column();
-        labels.addView(text(getString(R.string.home_address), 15, true));
-        String saved = Store.prefs(this).getString("home", "");
-        TextView value = detail(labels, saved.isEmpty() ? getString(R.string.home_not_set) : saved);
+        labels.addView(text(getString(title), 15, true));
+        String saved = Store.prefs(this).getString(key, "");
+        TextView value = detail(labels, saved.isEmpty() ? getString(notSet) : saved);
         item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
         item.setOnClickListener(view -> {
             android.widget.EditText input = new android.widget.EditText(this);
-            input.setText(Store.prefs(this).getString("home", ""));
+            input.setText(Store.prefs(this).getString(key, ""));
             input.setHint(R.string.home_hint);
             input.setSingleLine(true);
             android.widget.FrameLayout box = new android.widget.FrameLayout(this);
             box.setPadding(dp(24), dp(8), dp(24), 0);
             box.addView(input);
             new MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.home_address)
+                    .setTitle(title)
                     .setView(box)
                     .setPositiveButton(android.R.string.ok, (dialog, which) ->
-                            saveHome(input.getText().toString().trim(), value))
+                            savePlace(key, input.getText().toString().trim(), value, notSet))
                     .setNeutralButton(R.string.home_use_location, (dialog, which) ->
-                            homeFromLocation(value))
+                            placeFromLocation(key, value, notSet))
                     .setNegativeButton(android.R.string.cancel, null)
                     .show();
         });
     }
 
-    private void saveHome(String home, TextView value) {
-        Store.prefs(this).edit().putString("home", home).apply();
-        value.setText(home.isEmpty() ? getString(R.string.home_not_set) : home);
+    /** Which tiles DriveBoard Peta's panel shows (pref "panel_tiles", up to four). */
+    private void addPanelTilesRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        LinearLayout labels = column();
+        labels.addView(text(getString(R.string.panel_tiles), 15, true));
+        TextView value = detail(labels, panelTileNames());
+        item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        item.setOnClickListener(view -> {
+            PanelShortcut[] all = PanelShortcut.values();
+            String[] names = new String[all.length];
+            boolean[] checked = new boolean[all.length];
+            java.util.List<PanelShortcut> picked = PanelShortcut.parse(
+                    Store.prefs(this).getString("panel_tiles", PanelShortcut.DEFAULT));
+            for (int i = 0; i < all.length; i++) {
+                names[i] = getString(all[i].label);
+                checked[i] = picked.contains(all[i]);
+            }
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(getString(R.string.panel_tiles) + " · "
+                            + getString(R.string.panel_tiles_max))
+                    .setMultiChoiceItems(names, checked, (dialog, which, isChecked) -> {
+                        if (isChecked && picked.size() >= PanelShortcut.MAX) {
+                            // Already four: undo this tick.
+                            ((androidx.appcompat.app.AlertDialog) dialog).getListView()
+                                    .setItemChecked(which, false);
+                            checked[which] = false;
+                            return;
+                        }
+                        if (isChecked) picked.add(all[which]);
+                        else picked.remove(all[which]);
+                    })
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        Store.prefs(this).edit()
+                                .putString("panel_tiles", PanelShortcut.join(picked)).apply();
+                        value.setText(panelTileNames());
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        });
     }
 
-    private void homeFromLocation(TextView value) {
+    private String panelTileNames() {
+        StringBuilder names = new StringBuilder();
+        for (PanelShortcut shortcut : PanelShortcut.parse(
+                Store.prefs(this).getString("panel_tiles", PanelShortcut.DEFAULT))) {
+            if (names.length() > 0) names.append(" · ");
+            names.append(getString(shortcut.label));
+        }
+        return names.toString();
+    }
+
+    private void savePlace(String key, String place, TextView value, int notSet) {
+        Store.prefs(this).edit().putString(key, place).apply();
+        value.setText(place.isEmpty() ? getString(notSet) : place);
+    }
+
+    private void placeFromLocation(String key, TextView value, int notSet) {
         if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {android.Manifest.permission.ACCESS_FINE_LOCATION},
@@ -551,8 +604,8 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
                         value.setText(R.string.location_unavailable);
                         return;
                     }
-                    saveHome(String.format(java.util.Locale.ROOT, "%.6f,%.6f",
-                            location.getLatitude(), location.getLongitude()), value);
+                    savePlace(key, String.format(java.util.Locale.ROOT, "%.6f,%.6f",
+                            location.getLatitude(), location.getLongitude()), value, notSet);
                 });
     }
 

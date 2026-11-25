@@ -492,7 +492,49 @@ public final class BoardEditorActivity extends AppCompatActivity {
                 addToggle(row, spec);
             } else if ("choice".equals(spec.kind)) {
                 addChoice(row, spec);
+            } else if ("color".equals(spec.kind)) {
+                addColor(row, spec);
             }
+        }
+    }
+
+    /** Card colour swatches: grey glass, the theme's colour (half-filled), and fixed tints. */
+    private void addColor(LinearLayout row, WidgetType.OptionSpec spec) {
+        TextView caption = label(getString(spec.label), 13, false);
+        caption.setTextColor(muted);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-2, dp(48));
+        captionParams.rightMargin = dp(8);
+        row.addView(caption, captionParams);
+        BoardColours theme = BoardColours.current(this);
+        for (String value : spec.values) {
+            int fixed = WidgetType.fixedColor(value);
+            int fill = "grey".equals(value) ? theme.surfaceContainerHigh
+                    : "theme".equals(value) ? theme.primaryContainer : fixed;
+            android.graphics.drawable.GradientDrawable dot =
+                    new android.graphics.drawable.GradientDrawable();
+            dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            dot.setColor(fill);
+            boolean chosen = value.equals(selected.options.get(spec.key));
+            dot.setStroke(dp(chosen ? 3 : 1), chosen ? ink : muted);
+            View swatch = new View(this);
+            swatch.setBackground(dot);
+            swatch.setContentDescription(getString(spec.label) + " " + value);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(32), dp(32));
+            params.rightMargin = dp(10);
+            row.addView(swatch, params);
+            swatch.setOnClickListener(view -> {
+                setOption(spec.key, value);
+                for (int i = 0; i < row.getChildCount(); i++) {
+                    View child = row.getChildAt(i);
+                    if (child.getBackground() instanceof android.graphics.drawable.GradientDrawable
+                            && child.getContentDescription() != null
+                            && child.getContentDescription().toString()
+                                    .startsWith(getString(spec.label) + " ")) {
+                        ((android.graphics.drawable.GradientDrawable) child.getBackground())
+                                .setStroke(dp(child == view ? 3 : 1), child == view ? ink : muted);
+                    }
+                }
+            });
         }
     }
 

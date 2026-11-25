@@ -84,6 +84,8 @@ public enum WidgetType {
         this.drawer = drawer;
         Map<String, OptionSpec> specs = new LinkedHashMap<>();
         for (OptionSpec option : options) specs.put(option.key, option);
+        OptionSpec color = colorSpec();
+        specs.put(color.key, color);
         this.options = Collections.unmodifiableMap(specs);
     }
 
@@ -110,6 +112,26 @@ public enum WidgetType {
             if (type.id.equals(id)) return type;
         }
         return null;
+    }
+
+    /** Every card: grey glass by default, the theme's per-widget colour, or a fixed tint. */
+    // A method, not a static field: enum constants are built before static fields exist.
+    private static OptionSpec colorSpec() {
+        return new OptionSpec("color", R.string.widget_color, "color", "grey",
+                "grey", "theme", "teal", "blue", "purple", "green", "amber", "red");
+    }
+
+    /** Dark tints that keep light card text readable. */
+    static int fixedColor(String value) {
+        switch (value) {
+            case "teal": return 0xFF0E4A46;
+            case "blue": return 0xFF1F3A63;
+            case "purple": return 0xFF3E2C61;
+            case "green": return 0xFF24472E;
+            case "amber": return 0xFF5C4414;
+            case "red": return 0xFF5E2627;
+            default: return 0;
+        }
     }
 
     private static OptionSpec toggle(String key, int label, boolean defaultValue) {

@@ -11,4 +11,5 @@
     <string name="widget_show_progress">Papar kemajuan</string>
     <string name="widget_show_controls">Papar kawalan</string>
     <string name="widget_show_rain">Papar hujan</string>
+    <string name="widget_color">Warna</string>
 </resources>

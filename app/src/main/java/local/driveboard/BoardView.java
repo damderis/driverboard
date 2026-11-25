@@ -478,8 +478,15 @@ public final class BoardView extends View {
     private void drawCardLyrics(Canvas canvas, RectF r) {
         RectF area = cardLyricsArea(r);
         int index = lyricsLineIndex();
-        if (area.height() < 20f * unit() || index < 0) return;
         LyricsDocument.Line[] lines = displayLyrics.lines;
+        if (area.height() < 20f * unit() || lines.length == 0) return;
+        if (index < 0) {
+            // Intro, before the first line: show what comes first, dimmed.
+            float size = Math.min(17f * unit(), area.height() * .22f);
+            text(canvas, lines[0].text, area.left, area.centerY() + size * .35f, size * .9f,
+                    SAGE, Fonts.regular(getContext()), area.width());
+            return;
+        }
         float size = Math.min(17f * unit(), area.height() * .22f);
         TextPaint current = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         current.setTypeface(Fonts.semibold(getContext()));
@@ -718,15 +725,15 @@ public final class BoardView extends View {
                 bounds.right - pad, bounds.bottom - pad);
     }
 
-    /** Left edge of the music card's controls and timeline: full width under card lyrics. */
+    /** Left edge of the music card's controls and timeline: full width in tall cards. */
     private float mediaControlsLeft(RectF r) {
-        if (tallMediaCard(r) && cardLyrics()) return r.left;
+        if (tallMediaCard(r)) return r.left;
         return r.left + Math.min(r.height() * .95f, r.width() * .45f) + 10f * unit();
     }
 
     private MediaControlLayout mediaControlLayout(RectF r) {
-        if (tallMediaCard(r) && cardLyrics()) {
-            // The timeline and buttons span the card; the buttons keep their usual size.
+        if (tallMediaCard(r)) {
+            // Tall cards: the timeline and buttons span the card; the buttons keep their usual size.
             float left = r.left + Math.min(r.height() * .95f, r.width() * .45f) + 10f * unit();
             return MediaControlLayout.spread(MediaControlLayout.create(left, r.top, r.right,
                     r.bottom, controlDpScale(), r.width(), r.height()), r.left, r.right);
@@ -1494,7 +1501,7 @@ public final class BoardView extends View {
         canvas.save();
         renderingCardType = c.id;
         renderingCard = c;
-        drawCardSurface(canvas, c.type, r);
+        drawCardSurface(canvas, c, r);
         canvas.clipPath(cardPath(c.type, r));
         float pad = Math.max(4.5f * unit(),
                 Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
@@ -1716,14 +1723,21 @@ public final class BoardView extends View {
         return path;
     }
 
-    private void drawCardSurface(Canvas canvas, String type, RectF bounds) {
-        WidgetType widget = WidgetType.fromId(type);
-        int color = widget == WidgetType.CLOCK || widget == WidgetType.SHORTCUTS
-                ? colours.surfaceContainerHigh
-                : widget == WidgetType.PRAYER ? colours.primaryContainer
-                : widget == WidgetType.MEDIA || widget == WidgetType.AUDIO ? colours.secondaryContainer
-                : colours.tertiaryContainer;
-        drawGlassSurface(canvas, cardPath(type, bounds), bounds, color);
+    private void drawCardSurface(Canvas canvas, BoardLayout.Card card, RectF bounds) {
+        String choice = card.options.get("color");
+        int color;
+        if ("theme".equals(choice)) {
+            WidgetType widget = WidgetType.fromId(card.type);
+            color = widget == WidgetType.CLOCK || widget == WidgetType.SHORTCUTS
+                    ? colours.surfaceContainerHigh
+                    : widget == WidgetType.PRAYER ? colours.primaryContainer
+                    : widget == WidgetType.MEDIA || widget == WidgetType.AUDIO
+                    ? colours.secondaryContainer : colours.tertiaryContainer;
+        } else {
+            int fixed = choice == null ? 0 : WidgetType.fixedColor(choice);
+            color = fixed != 0 ? fixed : colours.surfaceContainerHigh;
+        }
+        drawGlassSurface(canvas, cardPath(card.type, bounds), bounds, color);
     }
 
     private void drawGlassSurface(Canvas canvas, Path shape, RectF bounds, int tint) {
@@ -2703,9 +2717,12 @@ public final class BoardView extends View {
         boolean header = tall && cardLyrics();
         float artworkSize = header ? Math.min(r.height() * .26f, r.width() * .24f)
                 : Math.min(r.height() * .95f, r.width() * .45f);
-        float artworkTop = header ? r.top : r.centerY() - artworkSize / 2f;
-        RectF artwork = new RectF(r.left, artworkTop,
-                r.left + artworkSize, artworkTop + artworkSize);
+        if (tall && !header) artworkSize = Math.min(r.height() * .40f, r.width() * .45f);
+        float artworkTop = header || tall ? r.top : r.centerY() - artworkSize / 2f;
+        // Tall card without lyrics: the cover sits top centre.
+        float artworkLeft = tall && !header ? r.centerX() - artworkSize / 2f : r.left;
+        RectF artwork = new RectF(artworkLeft, artworkTop,
+                artworkLeft + artworkSize, artworkTop + artworkSize);
         Path artShape = cookiePath(artwork);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFF000000);
@@ -2761,7 +2778,9 @@ public final class BoardView extends View {
             return;
         }
         if (tall) {
-            // No lyrics: a bigger title and artist centred in the space above the timeline.
+            // No lyrics: title and artist centred across the card, between the cover and timeline.
+            x = r.left;
+            width = r.width();
             float size = Math.min(26f * unit(), r.height() * .09f);
             TextPaint big = new TextPaint(Paint.ANTI_ALIAS_FLAG);
             big.setTypeface(Fonts.semibold(getContext()));
@@ -2772,9 +2791,9 @@ public final class BoardView extends View {
                     .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
                     .setIncludePad(false).setMaxLines(2)
                     .setEllipsize(TextUtils.TruncateAt.END).build();
-            float bottom = controls.playPause.top - 12f * unit();
+            float bottom = controls.playPause.top - 20f * unit();
             float block = name.getHeight() + size * 1.3f;
-            float top = r.top + (bottom - r.top - block) / 2f;
+            float top = artwork.bottom + (bottom - artwork.bottom - block) / 2f;
             canvas.save();
             canvas.translate(x, top);
             name.draw(canvas);

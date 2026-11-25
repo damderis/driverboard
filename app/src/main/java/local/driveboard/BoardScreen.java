@@ -125,7 +125,8 @@ public final class BoardScreen extends Screen {
         return AppLocale.locale(getCarContext()).toLanguageTag() + ":"
                 + AudioSwitchClient.read(getCarContext()).installed + ":" + browserMode
                 + ":" + lyricsVisible + ":" + (Store.page(getCarContext()) == 1)
-                + ":" + BoardColours.current(getCarContext()).primary;
+                + ":" + BoardColours.current(getCarContext()).primary
+                + ":" + prefs.getString("panel_tiles", PanelShortcut.DEFAULT);
     }
 
     private void refreshShortcutGrid() {
@@ -313,25 +314,13 @@ public final class BoardScreen extends Screen {
                     }));
             tiles++;
         }
-        items.addItem(shortcutTile(strings.getString(R.string.home), R.drawable.ic_shortcut_home,
-                () -> navigateHome(strings.getString(R.string.home_query))));
-        items.addItem(shortcutTile(strings.getString(R.string.charging_station),
-                R.drawable.ic_shortcut_charging,
-                () -> navigateTo(strings.getString(R.string.charging_query))));
-        // The browser runs in the DriveBoard navigation entry, which can go full screen.
-        items.addItem(shortcutTile(strings.getString(R.string.web), R.drawable.ic_shortcut_web, () -> {
-            try {
-                getCarContext().startCarApp(new android.content.Intent()
-                        .setComponent(new android.content.ComponentName(getCarContext(),
-                                DriveBoardService.class))
-                        .putExtra(DriveBoardService.EXTRA_OPEN, DriveBoardService.OPEN_WEB));
-            } catch (RuntimeException error) {
-                CarDiagnostics.log(getCarContext(), "Open DriveBoard web failed: " + error);
-            }
-        }));
-        items.addItem(shortcutTile(strings.getString(R.string.nearest_mosque),
-                R.drawable.ic_shortcut_mosque, () -> navigateTo("masjid")));
-        tiles += 4;
+        // The owner's picks from the phone app ("Shortcut tiles").
+        for (PanelShortcut shortcut : PanelShortcut.parse(
+                prefs.getString("panel_tiles", PanelShortcut.DEFAULT))) {
+            items.addItem(shortcutTile(strings.getString(shortcut.label), shortcut.icon,
+                    () -> runPanelShortcut(shortcut)));
+            tiles++;
+        }
         if (AudioSwitchClient.read(getCarContext()).installed) {
             items.addItem(shortcutTile(strings.getString(R.string.page_controls),
                     R.drawable.ic_shortcut_controls, () -> getScreenManager().push(
@@ -610,13 +599,32 @@ public final class BoardScreen extends Screen {
     }
 
     /** The Home tile: the phone app's saved home ("lat,lng" or an address), else a "Home" search. */
-    private void navigateHome(String fallback) {
-        String home = prefs.getString("home", "").trim();
-        if (home.matches("-?\\d+(\\.\\d+)?\\s*,\\s*-?\\d+(\\.\\d+)?")) {
-            String point = home.replaceAll("\\s", "");
-            navigateUri("geo:" + point + "?q=" + point, "home " + point);
+    private void runPanelShortcut(PanelShortcut shortcut) {
+        if (shortcut.place != null) {
+            navigatePlace(shortcut.place, "work".equals(shortcut.place) ? "Work" : "Home");
+        } else if (shortcut.query != null) {
+            navigateTo(shortcut.query);
         } else {
-            navigateTo(home.isEmpty() ? fallback : home);
+            // The browser runs in the DriveBoard navigation entry, which can go full screen.
+            try {
+                getCarContext().startCarApp(new android.content.Intent()
+                        .setComponent(new android.content.ComponentName(getCarContext(),
+                                DriveBoardService.class))
+                        .putExtra(DriveBoardService.EXTRA_OPEN, DriveBoardService.OPEN_WEB));
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Open DriveBoard web failed: " + error);
+            }
+        }
+    }
+
+    /** A saved place from the phone app ("lat,lng" or an address); else a search for its name. */
+    private void navigatePlace(String key, String fallback) {
+        String place = prefs.getString(key, "").trim();
+        if (place.matches("-?\\d+(\\.\\d+)?\\s*,\\s*-?\\d+(\\.\\d+)?")) {
+            String point = place.replaceAll("\\s", "");
+            navigateUri("geo:" + point + "?q=" + point, key + " " + point);
+        } else {
+            navigateTo(place.isEmpty() ? fallback : place);
         }
     }
 

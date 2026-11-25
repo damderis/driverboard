@@ -4,7 +4,7 @@ android {
     compileSdk 36
     buildFeatures { buildConfig true }
     defaultConfig {
-        applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 12; versionName '1.11'
+        applicationId 'com.aai.driverboard'; minSdk 31; targetSdk 36; versionCode 13; versionName '1.12'
     }
     signingConfigs {
         // Play upload key; path and passwords live in ~/.gradle/gradle.properties, never in the repo.
