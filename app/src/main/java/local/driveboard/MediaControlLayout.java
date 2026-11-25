@@ -80,6 +80,15 @@ public final class MediaControlLayout {
         return new MediaControlLayout(previous, playPause, next);
     }
 
+    /** Same-size buttons spread over [left, right]: previous, play centred, next at the edge. */
+    public static MediaControlLayout spread(MediaControlLayout normal, float left, float right) {
+        if (normal.previous == null || normal.next == null) return normal;
+        float size = normal.playPause.right - normal.playPause.left;
+        float top = normal.playPause.top;
+        return new MediaControlLayout(square(left, top, size),
+                square((left + right - size) / 2f, top, size), square(right - size, top, size));
+    }
+
     public static boolean isCompact(float cardHeight, float textColumnWidth) {
         return cardHeight < 110f || textColumnWidth < 120f;
     }

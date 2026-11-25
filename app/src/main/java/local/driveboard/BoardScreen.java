@@ -1172,6 +1172,8 @@ public final class BoardScreen extends Screen {
     }
 
     private void changePage(int delta) {
+        // DriveBoard Peta shows one board beside the map; no pages.
+        if (usesWeatherTemplate()) return;
         Store.setPage(getCarContext(), Store.page(getCarContext()) + delta);
         CarDiagnostics.log(getCarContext(), "Page " + Store.page(getCarContext()));
         board.prepareLayoutTransition();

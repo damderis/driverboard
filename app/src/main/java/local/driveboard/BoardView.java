@@ -725,6 +725,12 @@ public final class BoardView extends View {
     }
 
     private MediaControlLayout mediaControlLayout(RectF r) {
+        if (tallMediaCard(r) && cardLyrics()) {
+            // The timeline and buttons span the card; the buttons keep their usual size.
+            float left = r.left + Math.min(r.height() * .95f, r.width() * .45f) + 10f * unit();
+            return MediaControlLayout.spread(MediaControlLayout.create(left, r.top, r.right,
+                    r.bottom, controlDpScale(), r.width(), r.height()), r.left, r.right);
+        }
         return MediaControlLayout.create(mediaControlsLeft(r), r.top,
                 r.right, r.bottom, controlDpScale(), r.width(), r.height());
     }
@@ -982,7 +988,7 @@ public final class BoardView extends View {
     public void refresh() {
         if (dragging == null && !editorLayout) {
             layout = panelColumn()
-                    ? BoardLayout.panelLayout(Store.layout(getContext(), Store.NARROW))
+                    ? BoardLayout.panelLayout(Store.layout(getContext(), Store.NARROW, 0))
                     : Store.layout(getContext(), mode);
         }
         updateNavigation();
@@ -1471,7 +1477,7 @@ public final class BoardView extends View {
     }
 
     private void drawPageDots(Canvas canvas) {
-        if (pageCount < 2 || editing) return;
+        if (pageCount < 2 || editing || panelColumn()) return;
         float radius = Math.max(1.5f, edge() * .28f);
         float gap = radius * 3.2f;
         float y = getHeight() - edge() / 2f;
