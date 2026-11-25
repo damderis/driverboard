@@ -160,6 +160,8 @@ public final class WidgetData {
         }
     }
 
+    private static String lastSnapshotError;
+
     public static MediaSnapshot mediaSnapshot(Context c) {
         Context lc = AppLocale.wrap(c);
         if (!hasMediaAccess(c)) {
@@ -205,8 +207,13 @@ public final class WidgetData {
             if (resumable != null) {
                 return snapshotOf(resumable, resumableState, lc);
             }
-        } catch (RuntimeException ignored) {
-            // Permission or the session may disappear during the snapshot.
+        } catch (RuntimeException error) {
+            // Permission or the session may disappear during the snapshot; log each new cause once.
+            String cause = String.valueOf(error);
+            if (!cause.equals(lastSnapshotError)) {
+                lastSnapshotError = cause;
+                CarDiagnostics.log(c, "Media snapshot failed " + android.util.Log.getStackTraceString(error));
+            }
         }
         return new MediaSnapshot(lc.getString(R.string.media_nothing_playing),
                 lc.getString(R.string.media_start_music), "", null,
