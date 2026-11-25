@@ -10,7 +10,12 @@ import androidx.car.app.validation.HostValidator;
 import androidx.lifecycle.LifecycleEventObserver;
 
 /** Entry point for the car host. */
-public final class DriveBoardService extends CarAppService {
+public class DriveBoardService extends CarAppService {
+    /** False: the navigation entry. DriveBoardPetaService overrides this for the weather entry. */
+    protected boolean weather() {
+        return false;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -35,7 +40,7 @@ public final class DriveBoardService extends CarAppService {
     @NonNull
     @Override
     public Session onCreateSession() {
-        CarDiagnostics.log(this, "Session create");
+        CarDiagnostics.log(this, "Session create weather=" + weather());
 
         return new Session() {
             private BoardScreen boardScreen;
@@ -57,7 +62,7 @@ public final class DriveBoardService extends CarAppService {
             public Screen onCreateScreen(@NonNull android.content.Intent intent) {
                 CarDiagnostics.log(DriveBoardService.this, "Session screen API="
                         + getCarContext().getCarAppApiLevel());
-                boardScreen = new BoardScreen(getCarContext());
+                boardScreen = new BoardScreen(getCarContext(), weather());
                 return boardScreen;
             }
 

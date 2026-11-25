@@ -29,6 +29,7 @@ import androidx.car.app.model.CarIcon;
 
 import androidx.car.app.navigation.model.MapController;
 import androidx.car.app.navigation.model.MapWithContentTemplate;
+import androidx.car.app.navigation.model.NavigationTemplate;
 
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LifecycleEventObserver;
@@ -100,8 +101,17 @@ public final class BoardScreen extends Screen {
         }
     };
 
+    // Two car apps share this screen: "DriveBoard" (navigation: full screen and the side slot)
+    // and "DriveBoard Peta" (weather: the navigation app's map can sit beside it).
+    private final boolean weather;
+
     private boolean usesWeatherTemplate() {
-        return getCarContext().getCarAppApiLevel() >= 7;
+        return weather && getCarContext().getCarAppApiLevel() >= 7;
+    }
+
+    /** Whether the board is drawn on the car surface (weather needs car API 7). */
+    private boolean drawsSurface() {
+        return !weather || usesWeatherTemplate();
     }
 
     private String shortcutGridKey = "";
@@ -233,10 +243,12 @@ public final class BoardScreen extends Screen {
     private int lastDrawWidth;
     private int lastDrawHeight;
 
-    public BoardScreen(@NonNull CarContext carContext) {
+    public BoardScreen(@NonNull CarContext carContext, boolean weather) {
         super(carContext);
+        this.weather = weather;
         prefs = Store.prefs(carContext);
         board = new BoardView(carContext);
+        board.setBannerFullOnly(weather);
         board.setFrameRequestHook(this::requestDraw);
         getLifecycle().addObserver((LifecycleEventObserver) (source, event) -> {
             if (event == Lifecycle.Event.ON_START) {
@@ -262,6 +274,13 @@ public final class BoardScreen extends Screen {
             mapStrip = new ActionStrip.Builder()
                     .addAction(pageArrow(R.drawable.ic_page_previous, -1))
                     .addAction(pageArrow(R.drawable.ic_page_next, 1)).build();
+        }
+        if (!weather) {
+            CarDiagnostics.log(getCarContext(), "Template=NavigationTemplate carApi=" + api);
+            NavigationTemplate.Builder template = new NavigationTemplate.Builder()
+                    .setActionStrip(navigationActions(strings));
+            if (mapStrip != null) template.setMapActionStrip(mapStrip);
+            return template.build();
         }
         if (usesWeatherTemplate()) {
             MapController.Builder controller = new MapController.Builder();
@@ -313,6 +332,34 @@ public final class BoardScreen extends Screen {
                 .setSingleList(items.build()).build();
     }
 
+    /** The navigation entry's action strip (Android Auto allows four actions). */
+    private ActionStrip navigationActions(android.content.Context strings) {
+        ActionStrip.Builder actions = new ActionStrip.Builder();
+        if (browserMode || lyricsVisible) {
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.board))
+                    .setOnClickListener(() -> {
+                        if (browserMode) closeBrowser();
+                        else toggleLyrics();
+                    }).build());
+            return actions.build();
+        }
+        boolean media = Store.page(getCarContext()) == 1;
+        actions.addAction(new Action.Builder()
+                .setTitle(strings.getString(media ? R.string.board : R.string.page_media))
+                .setOnClickListener(() -> changePage(media ? -1 : 1 - Store.page(getCarContext())))
+                .build());
+        actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.lyrics))
+                .setOnClickListener(this::toggleLyrics).build());
+        actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.web))
+                .setOnClickListener(() -> openBrowser("https://www.google.com")).build());
+        if (AudioSwitchClient.read(getCarContext()).installed) {
+            actions.addAction(new Action.Builder().setTitle(strings.getString(R.string.page_controls))
+                    .setOnClickListener(() -> getScreenManager().push(
+                            new ControlsScreen(getCarContext(), this))).build());
+        }
+        return actions.build();
+    }
+
     /** Tiles in the shortcut grid (must match shortcutContent). */
     private int shortcutTiles = 4;
 
@@ -346,7 +393,7 @@ public final class BoardScreen extends Screen {
         refreshShortcutGrid();
         prefs.registerOnSharedPreferenceChangeListener(prefsListener);
         scheduleTick();
-        if (!usesWeatherTemplate()) return;
+        if (!drawsSurface()) return;
         board.startNavigation();
         final long epoch = ++callbackEpoch;
         surfaceCallback = new SurfaceCallback() {
@@ -368,14 +415,14 @@ public final class BoardScreen extends Screen {
             }
             @Override
             public void onClick(float x, float y) {
-                if (BuildConfig.WEATHER_MODE) {
+                if (weather) {
                     CarDiagnostics.log(getCarContext(), "Weather surface onClick x=" + x + " y=" + y);
                 }
                 onSurfaceClick(epoch, x, y);
             }
             @Override
             public void onScroll(float distanceX, float distanceY) {
-                if (BuildConfig.WEATHER_MODE) {
+                if (weather) {
                     CarDiagnostics.log(getCarContext(), "Weather surface onScroll dx=" + distanceX
                             + " dy=" + distanceY);
                 }
@@ -387,7 +434,7 @@ public final class BoardScreen extends Screen {
             }
             @Override
             public void onFling(float velocityX, float velocityY) {
-                if (BuildConfig.WEATHER_MODE) {
+                if (weather) {
                     CarDiagnostics.log(getCarContext(), "Weather surface onFling vx=" + velocityX
                             + " vy=" + velocityY);
                 }
@@ -406,7 +453,7 @@ public final class BoardScreen extends Screen {
             }
             @Override
             public void onScale(float focusX, float focusY, float scaleFactor) {
-                if (BuildConfig.WEATHER_MODE) {
+                if (weather) {
                     CarDiagnostics.log(getCarContext(), "Weather surface onScale x=" + focusX
                             + " y=" + focusY + " factor=" + scaleFactor);
                 }
@@ -464,7 +511,7 @@ public final class BoardScreen extends Screen {
         board.setLyricsLoading(false);
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener);
         try {
-            if (usesWeatherTemplate()) getCarContext().getCarService(AppManager.class).setSurfaceCallback(null);
+            if (drawsSurface()) getCarContext().getCarService(AppManager.class).setSurfaceCallback(null);
         } catch (RuntimeException error) {
             CarDiagnostics.log(getCarContext(), "Surface unregistration failed: " + error);
         }
@@ -503,7 +550,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         // The host owns these surfaces; releasing one it still renders to aborts RenderThread.
-        CarDiagnostics.log(getCarContext(), "Surface available weatherMode=" + BuildConfig.WEATHER_MODE + " " + nextContainer.getWidth()
+        CarDiagnostics.log(getCarContext(), "Surface available weatherMode=" + weather + " " + nextContainer.getWidth()
                 + "x" + nextContainer.getHeight() + " dpi=" + nextContainer.getDpi());
         Surface nextSurface = nextContainer.getSurface();
         releaseCanvasSurface();
@@ -546,7 +593,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch) {
             return;
         }
-        CarDiagnostics.log(getCarContext(), "Visible area=" + area + " weatherMode=" + BuildConfig.WEATHER_MODE);
+        CarDiagnostics.log(getCarContext(), "Visible area=" + area + " weatherMode=" + weather);
         visibleArea = new Rect(area);
         if (browserMode) attachBrowserSurface();
         updateBrowserArea();
@@ -561,7 +608,7 @@ public final class BoardScreen extends Screen {
         if (!started || epoch != callbackEpoch) {
             return;
         }
-        CarDiagnostics.log(getCarContext(), "Stable area=" + area + " weatherMode=" + BuildConfig.WEATHER_MODE);
+        CarDiagnostics.log(getCarContext(), "Stable area=" + area + " weatherMode=" + weather);
         stableArea = new Rect(area);
         if (browserMode) attachBrowserSurface();
         updateBrowserArea();
@@ -573,7 +620,7 @@ public final class BoardScreen extends Screen {
             handler.post(() -> onDestroyed(epoch, destroyedContainer));
             return;
         }
-        CarDiagnostics.log(getCarContext(), "Surface destroyed weatherMode=" + BuildConfig.WEATHER_MODE);
+        CarDiagnostics.log(getCarContext(), "Surface destroyed weatherMode=" + weather);
         Surface destroyed = destroyedContainer.getSurface();
         if (!started || epoch != callbackEpoch || surface == null) {
             return;
@@ -637,7 +684,7 @@ public final class BoardScreen extends Screen {
             handler.post(() -> openBrowser(url));
             return;
         }
-        if (!usesWeatherTemplate()) {
+        if (!drawsSurface()) {
             androidx.car.app.CarToast.makeText(getCarContext(),
                     AppLocale.wrap(getCarContext()).getString(R.string.browser_host_unsupported),
                     androidx.car.app.CarToast.LENGTH_SHORT).show();
@@ -848,7 +895,7 @@ public final class BoardScreen extends Screen {
             handler.post(this::drawBoard);
             return;
         }
-        if (!usesWeatherTemplate() || !started || browserMode || browserClosing || container == null || surface == null) {
+        if (!drawsSurface() || !started || browserMode || browserClosing || container == null || surface == null) {
             return;
         }
         if (!surface.isValid()) {
@@ -1176,7 +1223,7 @@ public final class BoardScreen extends Screen {
     }
 
     private void toggleLyrics() {
-        if (!usesWeatherTemplate()) {
+        if (!drawsSurface()) {
             androidx.car.app.CarToast.makeText(getCarContext(),
                     AppLocale.wrap(getCarContext()).getString(R.string.surface_host_unsupported),
                     androidx.car.app.CarToast.LENGTH_SHORT).show();

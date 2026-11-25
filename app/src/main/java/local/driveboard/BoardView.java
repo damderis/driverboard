@@ -91,11 +91,19 @@ public final class BoardView extends View {
         return true;
     }
 
+    private boolean bannerFullOnly;
+
+    /** Weather entry: hide the directions banner unless full screen (the map is beside it). */
+    public void setBannerFullOnly(boolean value) {
+        bannerFullOnly = value;
+    }
+
     private void drawNavigation(Canvas canvas) {
         updateNavigation();
         float alpha = navigationAlpha();
-        // Split/narrow sit next to Android Auto's side panel, which shows the map's own route.
-        if (navigationState == null || alpha <= 0f || editing || !Store.FULL.equals(mode)) {
+        // The weather entry's split/narrow sit next to Android Auto's side panel showing the map.
+        if (navigationState == null || alpha <= 0f || editing
+                || (bannerFullOnly && !Store.FULL.equals(mode))) {
             navigationBounds.setEmpty();
             return;
         }
