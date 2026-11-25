@@ -109,7 +109,8 @@ public final class BoardScreen extends Screen {
     private String shortcutGridKey() {
         return AppLocale.locale(getCarContext()).toLanguageTag() + ":"
                 + AudioSwitchClient.read(getCarContext()).installed + ":" + browserMode
-                + ":" + lyricsVisible + ":" + (Store.page(getCarContext()) == 1);
+                + ":" + lyricsVisible + ":" + (Store.page(getCarContext()) == 1)
+                + ":" + BoardColours.current(getCarContext()).primary;
     }
 
     private void refreshShortcutGrid() {
@@ -292,9 +293,9 @@ public final class BoardScreen extends Screen {
                 }));
         items.addItem(shortcutTile(strings.getString(R.string.web), R.drawable.ic_shortcut_web,
                 () -> openBrowser("https://www.google.com")));
-        items.addItem(shortcutTile("YouTube", R.drawable.ic_shortcut_youtube,
-                () -> openBrowser("https://www.youtube.com")));
-        if (AudioSwitchClient.read(getCarContext()).installed) {
+        boolean audioSwitch = AudioSwitchClient.read(getCarContext()).installed;
+        shortcutTiles = audioSwitch ? 5 : 4;
+        if (audioSwitch) {
             items.addItem(shortcutTile(strings.getString(R.string.page_controls),
                     R.drawable.ic_shortcut_controls, () -> getScreenManager().push(
                             new ControlsScreen(getCarContext(), this))));
@@ -312,11 +313,24 @@ public final class BoardScreen extends Screen {
                 .setSingleList(items.build()).build();
     }
 
+    /** Tiles in the shortcut grid (must match shortcutContent). */
+    private int shortcutTiles = 4;
+
+    private int shortcutCount() {
+        return shortcutTiles;
+    }
+
+    /** Board accent for the panel icons, so Android Auto's panel echoes the cards. */
+    private androidx.car.app.model.CarColor accentTint() {
+        int accent = BoardColours.current(getCarContext()).primary;
+        return androidx.car.app.model.CarColor.createCustom(accent, accent);
+    }
+
     private GridItem shortcutTile(String title, int icon, androidx.car.app.model.OnClickListener click) {
         return new GridItem.Builder().setTitle(title)
                 .setImage(new CarIcon.Builder(androidx.core.graphics.drawable.IconCompat
                         .createWithResource(getCarContext(), icon))
-                        .setTint(androidx.car.app.model.CarColor.DEFAULT).build(), GridItem.IMAGE_TYPE_ICON)
+                        .setTint(accentTint()).build(), GridItem.IMAGE_TYPE_ICON)
                 .setOnClickListener(click).build();
     }
 
@@ -856,6 +870,21 @@ public final class BoardScreen extends Screen {
         }
         if (!drawArea.intersect(bounds) || drawArea.isEmpty()) {
             return;
+        }
+        // Android Auto reserves a left column for the weather template's panel but its card only
+        // fills the top. Draw across the whole width and lay the board around that card.
+        if (usesWeatherTemplate() && !lyricsVisible && stableArea.left > width * .25f) {
+            // ponytail: the host does not report its panel size; these fractions were measured on
+            // the 1920x1080 DHU (card at x 12..stableLeft-13 and y from 12, header 80px, 128px per grid row of
+            // two tiles). Re-measure if a head unit draws the panel differently.
+            float h = height;
+            int rows = (shortcutCount() + 1) / 2;
+            float panelBottom = h * .0112f + h * .0746f + rows * h * .1194f;
+            board.setPanelColumn(h * .0112f, stableArea.left - h * .0121f, h * .0112f,
+                    panelBottom, stableArea.left);
+            drawArea.set(0, 0, width, height);
+        } else {
+            board.setPanelColumn(0f, 0f, 0f, 0f, 0f);
         }
         boolean originChanged = !lastDrawArea.isEmpty()
                 && (drawArea.left != lastDrawArea.left || drawArea.top != lastDrawArea.top);

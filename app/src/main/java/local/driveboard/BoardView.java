@@ -897,7 +897,9 @@ public final class BoardView extends View {
 
     public void refresh() {
         if (dragging == null && !editorLayout) {
-            layout = Store.layout(getContext(), mode);
+            layout = panelColumn()
+                    ? BoardLayout.panelLayout(Store.layout(getContext(), Store.NARROW))
+                    : Store.layout(getContext(), mode);
         }
         updateNavigation();
         words = AppLocale.wrap(getContext());
@@ -1060,7 +1062,50 @@ public final class BoardView extends View {
         return Math.max(2f, 8f * unit());
     }
 
+    // Android Auto's content panel column (weather template), in board coordinates; 0 = none.
+    private float panelLeft, panelRight, panelTop, panelBottom, panelStableLeft;
+
+    /** Lays the board around Android Auto's panel: weather under the panel, prayer and music right. */
+    public void setPanelColumn(float left, float right, float top, float bottom, float stableLeft) {
+        if (left == panelLeft && right == panelRight && top == panelTop && bottom == panelBottom
+                && stableLeft == panelStableLeft) return;
+        panelLeft = left;
+        panelRight = right;
+        panelTop = top;
+        panelBottom = bottom;
+        panelStableLeft = stableLeft;
+        CarDiagnostics.log(getContext(), "Board panel column left=" + left + " right=" + right
+                + " bottom=" + bottom + " stableLeft=" + stableLeft);
+        refresh();
+    }
+
+    private boolean panelColumn() {
+        return panelRight > 0f;
+    }
+
+    private RectF panelBounds(BoardLayout.Card card, float width, float height) {
+        // Mirror Android Auto's panel: its outer margins on every side, one gutter between cards.
+        float gutter = panelLeft * 2f;
+        float top = panelTop;
+        float bottom = height - panelTop;
+        float right = width - panelLeft;
+        float rightLeft = Math.max(panelRight + gutter, panelStableLeft);
+        float split = top + (bottom - top) * .36f;
+        switch (card.type) {
+            case "prayer":
+                return new RectF(rightLeft, top, right, split - gutter / 2f);
+            case "media":
+                return new RectF(rightLeft, split + gutter / 2f, right, bottom);
+            case "weather":
+                return new RectF(panelLeft, Math.min(panelBottom + gutter, bottom - 1f),
+                        panelRight, bottom);
+            default:
+                return new RectF();
+        }
+    }
+
     private RectF bounds(BoardLayout.Card c) {
+        if (panelColumn()) return panelBounds(c, getWidth(), getHeight());
         float e = edge();
         float cw = (getWidth() - 2 * e) / 12f;
         float ch = (getHeight() - 2 * e) / 6f;
@@ -1165,6 +1210,7 @@ public final class BoardView extends View {
     }
 
     private RectF bounds(BoardLayout.Card card, int width, int height) {
+        if (panelColumn()) return panelBounds(card, width, height);
         float unit = Math.max(.25f, Math.min(width / 390f, height / 150f));
         float edge = Math.max(2f, 8f * unit);
         float cellWidth = (width - 2 * edge) / 12f;

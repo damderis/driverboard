@@ -240,6 +240,21 @@ public final class BoardLayout {
         return b;
     }
 
+    /**
+     * Cards for the board around Android Auto's panel column. Positions come from BoardView's
+     * panel bounds; only the card set and each card's options matter here.
+     */
+    public static BoardLayout panelLayout(BoardLayout narrow) {
+        BoardLayout b = new BoardLayout();
+        int row = 0;
+        for (String type : new String[] {"prayer", "media", "weather"}) {
+            Card card = findType(narrow, type);
+            b.cards.add(card != null ? derived(card, 0, row, 12, 2) : new Card(type, 0, row, 12, 2));
+            row += 2;
+        }
+        return b;
+    }
+
     private static Card findType(BoardLayout layout, String type) {
         for (Card card : layout.cards) if (type.equals(card.type)) return card;
         return null;
