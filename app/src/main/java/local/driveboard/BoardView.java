@@ -718,9 +718,14 @@ public final class BoardView extends View {
                 bounds.right - pad, bounds.bottom - pad);
     }
 
+    /** Left edge of the music card's controls and timeline: full width under card lyrics. */
+    private float mediaControlsLeft(RectF r) {
+        if (tallMediaCard(r) && cardLyrics()) return r.left;
+        return r.left + Math.min(r.height() * .95f, r.width() * .45f) + 10f * unit();
+    }
+
     private MediaControlLayout mediaControlLayout(RectF r) {
-        float artSize = Math.min(r.height() * .95f, r.width() * .45f);
-        return MediaControlLayout.create(r.left + artSize + 10f * unit(), r.top,
+        return MediaControlLayout.create(mediaControlsLeft(r), r.top,
                 r.right, r.bottom, controlDpScale(), r.width(), r.height());
     }
 
@@ -2892,8 +2897,7 @@ public final class BoardView extends View {
                     Math.min(bounds.width(), bounds.height()) * .08f);
             RectF r = new RectF(bounds.left + pad, bounds.top + pad,
                     bounds.right - pad, bounds.bottom - pad);
-            float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
-            float x = r.left + artworkSize + 10f * unit();
+            float x = mediaControlsLeft(r);
             float width = Math.max(1f, r.right - x);
             if (MediaControlLayout.isCompact(r.height(), width, controlDpScale())) continue;
             float progress = Math.max(0f, Math.min(1f,
