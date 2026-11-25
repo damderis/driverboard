@@ -19,6 +19,7 @@ public final class BackgroundStore {
     private static Bitmap cached;
     private static long cachedVersion = Long.MIN_VALUE;
     private static String cachedPath;
+    private static long cachedModified = Long.MIN_VALUE;
 
     private BackgroundStore() {}
 
@@ -47,14 +48,24 @@ public final class BackgroundStore {
 
     public static synchronized Bitmap load(Context context) {
         long version = Store.prefs(context).getLong("background_at", 0);
-        String path = imageFile(context).getAbsolutePath();
-        if (version != cachedVersion || !path.equals(cachedPath)) {
+        File file = imageFile(context);
+        String path = file.getAbsolutePath();
+        long modified = file.lastModified();
+        if (version != cachedVersion || !path.equals(cachedPath)
+                || modified != cachedModified) {
             // A previous frame may still own the old bitmap; let GC reclaim it safely.
             cached = version == 0 ? null : BitmapFactory.decodeFile(path);
             cachedVersion = version;
             cachedPath = path;
+            cachedModified = modified;
         }
         return cached;
+    }
+
+    public static String identity(Context context) {
+        File file = imageFile(context);
+        return file.getAbsolutePath() + ":" + file.lastModified() + ":"
+                + Store.prefs(context).getLong("background_at", 0);
     }
 
     public static void importSource(Context context, Uri uri) throws IOException {

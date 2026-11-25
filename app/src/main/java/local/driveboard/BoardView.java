@@ -32,9 +32,10 @@ import java.util.Map;
 
 /** Shared proportional renderer for the phone preview and car surface. */
 public final class BoardView extends View {
+    private static final long NAVIGATION_DURATION_MS = 250;
     private final NavigationRepository.Listener navigationListener = () -> {
         updateNavigation();
-        requestControlDraw();
+        requestOverlayDraw();
         scheduleFrame();
     };
     private NavigationState navigationState;
@@ -62,7 +63,8 @@ public final class BoardView extends View {
         float target = navigationShown ? 1f : 0f;
         if (navigationAt == 0) return target;
         return navigationFrom + (target - navigationFrom)
-                * BoardTransition.progress(SystemClock.uptimeMillis() - navigationAt);
+                * BoardTransition.progress((SystemClock.uptimeMillis() - navigationAt)
+                * BoardTransition.DURATION_MS / NAVIGATION_DURATION_MS);
     }
 
     private void updateNavigation() {
@@ -79,7 +81,7 @@ public final class BoardView extends View {
 
     public boolean isNavigationTransitioning() {
         return navigationAt != 0 && SystemClock.uptimeMillis() - navigationAt
-                < BoardTransition.DURATION_MS;
+                < NAVIGATION_DURATION_MS;
     }
 
     public boolean hitNavigation(float x, float y) {
@@ -115,11 +117,11 @@ public final class BoardView extends View {
                 r.right + 8, r.bottom + 8, Math.round(alpha * 255));
         Path shape = new Path();
         shape.addRoundRect(r, height * .24f, height * .24f, Path.Direction.CW);
-        drawGlassSurface(canvas, shape, r, colours.surfaceContainerHigh);
-        // The banner floats over busy cards: a near-opaque layer keeps the directions legible.
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor((colours.surfaceContainerHigh & 0x00FFFFFF) | 0xFA000000);
+        paint.setColor(colours.surfaceContainerHigh);
+        paint.setShadowLayer(Math.max(1f, height * .04f), 0, height * .015f, 0x40000000);
         canvas.drawPath(shape, paint);
+        paint.clearShadowLayer();
         float pad = Math.min(18f * scale, height * .14f);
         float diameter = Math.min(height - 2 * pad, 64f * scale);
         float cx = r.left + pad + diameter / 2f;
@@ -149,7 +151,7 @@ public final class BoardView extends View {
         float x = cx + diameter / 2f + pad;
         float titleSize = Math.min(28f * scale, height * (collapsed ? .42f : .25f));
         float etaWidth = collapsed || nav.eta.isEmpty() ? 0f : width * .25f;
-        float textWidth = Math.max(1f, r.right - pad - etaWidth - x);
+        float textWidth = Math.max(1f, r.right - pad * 1.4f - etaWidth - x);
         if (collapsed) {
             text(canvas, nav.distance.isEmpty() ? nav.instruction : nav.distance,
                     x, r.centerY() + titleSize * .35f, titleSize, colours.onSurface,
@@ -168,7 +170,7 @@ public final class BoardView extends View {
                     .setIncludePad(false).setMaxLines(hasDistance ? 1 : 2)
                     .setEllipsize(TextUtils.TruncateAt.END).build();
             float headline = hasDistance ? titleSize * 1.2f : 0f;
-            float blockTop = r.centerY() - (headline + lines.getHeight()) / 2f - pad * .15f;
+            float blockTop = r.centerY() - (headline + lines.getHeight()) / 2f;
             if (hasDistance) {
                 text(canvas, nav.distance, x, blockTop + titleSize, titleSize,
                         colours.onSurface, Fonts.semibold(getContext()), textWidth);
@@ -183,19 +185,26 @@ public final class BoardView extends View {
                 Paint etaPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
                 etaPaint.setTypeface(Fonts.semibold(getContext()));
                 etaPaint.setTextSize(etaSize);
-                float etaX = r.right - pad - Math.min(etaWidth, etaPaint.measureText(nav.eta));
-                text(canvas, nav.eta, etaX, r.centerY() + etaSize * .35f - pad * .15f, etaSize,
+                float etaX = r.right - pad * 1.4f
+                        - Math.min(etaWidth, etaPaint.measureText(nav.eta));
+                float instructionCenter = blockTop + headline + lines.getHeight() / 2f;
+                float etaBaseline = instructionCenter
+                        - (etaPaint.ascent() + etaPaint.descent()) / 2f;
+                text(canvas, nav.eta, etaX, etaBaseline, etaSize,
                         colours.primary, Fonts.semibold(getContext()), etaWidth);
             }
-            float stroke = Math.max(1.5f, 2.5f * scale);
+            float stroke = Math.max(2f, 2.5f * scale);
             float lineY = r.bottom - stroke * 1.4f;
             paint.setStrokeWidth(stroke);
             paint.setStrokeCap(Paint.Cap.ROUND);
             paint.setColor((colours.primary & 0x00FFFFFF) | 0x4D000000);
             canvas.drawLine(r.left + pad, lineY, r.right - pad, lineY, paint);
             paint.setColor(colours.primary);
+            float trackLength = width - 2 * pad;
+            float activeLength = Math.min(trackLength, Math.max(stroke,
+                    trackLength * Math.max(0f, Math.min(1f, nav.progress))));
             canvas.drawLine(r.left + pad, lineY,
-                    r.left + pad + (width - 2 * pad) * nav.progress, lineY, paint);
+                    r.left + pad + activeLength, lineY, paint);
         }
         paint.setAlpha(255);
         canvas.restoreToCount(save);
@@ -282,6 +291,8 @@ public final class BoardView extends View {
     private Runnable onEdit;
     private LyricsDocument lyrics;
     private LyricsDocument displayLyrics;
+    private long displayLyricsDuration = Long.MIN_VALUE;
+    private String lyricStyleLocale;
     private boolean lyricsVisible;
     private boolean lyricsLoading;
     private long lyricsPosition;
@@ -309,9 +320,10 @@ public final class BoardView extends View {
     }
     private Bitmap staticLayer;
     private boolean staticDirty = true;
-    private long staticDrawnAt;
+    private BoardStaticSignature staticSignature;
     private Runnable frameRequestHook;
     private boolean frameScheduled;
+    private boolean frameDelayed;
     private int slowFrames;
     private boolean reducedFrameRate;
     private long lastRenderedFrameNanos;
@@ -331,6 +343,7 @@ public final class BoardView extends View {
     private Path cookieTemplate;
     private Bitmap artworkTile;
     private Bitmap artworkTileSource;
+    private int artworkTileGeneration;
     private long transitionStartedAt;
     private boolean transitionPending;
     private String renderingCardType;
@@ -362,11 +375,12 @@ public final class BoardView extends View {
     }
     private final Choreographer.FrameCallback frameCallback = frameTimeNanos -> {
         frameScheduled = false;
+        frameDelayed = false;
         if (!isAttachedToWindow() || getVisibility() != VISIBLE
                 || frameRequestHook != null) {
             return;
         }
-        if (isMediaPlaying() && !isTransitioning()) {
+        if (isMediaPlaying() && !isTransitioning() && !isNavigationTransitioning()) {
             long spacing = reducedFrameRate ? 65_000_000L : 32_000_000L;
             if (lastRenderedFrameNanos > 0
                     && frameTimeNanos - lastRenderedFrameNanos < spacing) {
@@ -427,7 +441,8 @@ public final class BoardView extends View {
             return;
         }
         lyrics = document;
-        displayLyrics = document == null ? null : document.estimated(media == null ? 0 : media.duration);
+        displayLyricsDuration = media == null ? 0 : media.duration;
+        displayLyrics = document == null ? null : document.estimated(displayLyricsDuration);
         displayedLyric = Integer.MIN_VALUE;
         clearLyricBlocks();
         if (lyricsVisible) {
@@ -485,9 +500,9 @@ public final class BoardView extends View {
         boolean approximate = QuranPosition.isApproximate(metadataAyah,
                 quranTiming != null, estimatedAyah);
         QuranMetadata next = source == null ? null : source.withAyah(ayah);
-        if (next == null || displayedQuran == null
-                || next.surah.number != displayedQuran.surah.number
-                || next.ayah != displayedQuran.ayah) {
+        if ((next == null) != (displayedQuran == null)
+                || next != null && (next.surah.number != displayedQuran.surah.number
+                || next.ayah != displayedQuran.ayah)) {
             outgoingQuran = next != null && displayedQuran != null
                     && next.surah.number == displayedQuran.surah.number
                     ? displayedQuran : null;
@@ -565,6 +580,11 @@ public final class BoardView extends View {
 
     private void requestControlDraw() {
         invalidateStatic();
+        requestOverlayDraw();
+    }
+
+    private void requestOverlayDraw() {
+        invalidate();
         if (frameRequestHook != null) {
             frameRequestHook.run();
         }
@@ -776,12 +796,20 @@ public final class BoardView extends View {
     }
 
     private void scheduleFrame() {
-        if (frameScheduled || frameRequestHook != null || !isAttachedToWindow()
+        if (frameRequestHook != null || !isAttachedToWindow()
                 || getVisibility() != VISIBLE) {
             return;
         }
+        boolean urgent = isMediaPlaying() || isTransitioning()
+                || isQuranTransitioning() || isNavigationTransitioning();
+        if (frameScheduled) {
+            if (!urgent || !frameDelayed) return;
+            Choreographer.getInstance().removeFrameCallback(frameCallback);
+            frameScheduled = false;
+        }
         frameScheduled = true;
-        if (isMediaPlaying() || isTransitioning() || isQuranTransitioning() || isNavigationTransitioning()) {
+        frameDelayed = !urgent;
+        if (urgent) {
             Choreographer.getInstance().postFrameCallback(frameCallback);
         } else {
             Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, 1000);
@@ -799,6 +827,7 @@ public final class BoardView extends View {
     protected void onDetachedFromWindow() {
         Choreographer.getInstance().removeFrameCallback(frameCallback);
         frameScheduled = false;
+        frameDelayed = false;
         lastRenderedFrameNanos = 0;
         slowFrames = 0;
         reducedFrameRate = false;
@@ -811,6 +840,7 @@ public final class BoardView extends View {
             artworkTile.recycle();
             artworkTile = null;
             artworkTileSource = null;
+            artworkTileGeneration = 0;
         }
         stopNavigation();
         super.onDetachedFromWindow();
@@ -879,10 +909,13 @@ public final class BoardView extends View {
         media = WidgetData.mediaSnapshot(words);
         requestQuranPositionData();
         updateQuranPosition(media);
-        if (lyrics != null && !lyrics.isTimed()) {
+        if (lyrics != null && !lyrics.isTimed()
+                && displayLyricsDuration != (media == null ? 0 : media.duration)) {
             long oldDuration = displayLyrics == null || displayLyrics.lines.length == 0 ? 0
                     : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs;
-            displayLyrics = lyrics.estimated(media == null ? 0 : media.duration);
+            displayLyricsDuration = media == null ? 0 : media.duration;
+            displayLyrics = lyrics.estimated(displayLyricsDuration);
+            clearLyricBlocks();
             if (oldDuration != (displayLyrics.lines.length == 0 ? 0
                     : displayLyrics.lines[displayLyrics.lines.length - 1].timeMs)) {
                 displayedLyric = Integer.MIN_VALUE;
@@ -890,10 +923,77 @@ public final class BoardView extends View {
         }
         bindMediaControls();
         background = BackgroundStore.load(getContext());
+        int previousSeed = colours == null ? 0 : colours.seed;
         colours = BoardColours.current(getContext(), media == null ? null : media.art);
-        clearLyricBlocks();
-        invalidateStatic();
+        String localeTag = AppLocale.locale(getContext()).toLanguageTag();
+        if (previousSeed != colours.seed || !localeTag.equals(lyricStyleLocale)) {
+            clearLyricBlocks();
+            lyricStyleLocale = localeTag;
+        }
+        BoardStaticSignature nextSignature = staticSignature();
+        if (!nextSignature.equals(staticSignature)) {
+            staticSignature = nextSignature;
+            invalidateStatic();
+        }
         scheduleFrame();
+    }
+
+    private BoardStaticSignature staticSignature() {
+        BoardStaticSignature.Builder key = BoardStaticSignature.builder()
+                .add(mode).add(layout.toJson())
+                .add(AppLocale.locale(getContext()).toLanguageTag())
+                .add(time).add(date)
+                .add(BackgroundStore.identity(getContext()))
+                .add(background == null ? 0 : System.identityHashCode(background))
+                .add(colours == null ? 0 : colours.seed)
+                .add(carNight).add(editing).add(lyricsVisible)
+                .add(selectedCard == null ? null : selectedCard.id)
+                .add(pageIndex).add(pageCount)
+                .add(quranEdition).add(quranApproximate).add(lyricsLoading)
+                .add(displayedQuran == null ? null : displayedQuran.heading())
+                .add(displayedQuran == null ? 0 : displayedQuran.ayah)
+                .add(System.identityHashCode(quranDocument));
+        if (prayer == null) {
+            key.add(false);
+        } else {
+            key.add(true).add(prayer.zoneName).add(prayer.zoneCode)
+                    .add(prayer.countdown).add(prayer.status).add(prayer.updated);
+            WidgetData.PrayerRow[] rows = prayer.rows;
+            key.add(rows == null ? -1 : rows.length);
+            if (rows != null) {
+                for (WidgetData.PrayerRow row : rows) {
+                    if (row == null) {
+                        key.add(false);
+                    } else {
+                        key.add(true).add(row.name).add(row.time).add(row.past).add(row.next);
+                    }
+                }
+            }
+        }
+        if (weather == null) {
+            key.add(false);
+        } else {
+            key.add(true).add(Double.doubleToLongBits(weather.tempC))
+                    .add(weather.condition).add(weather.rainProbability)
+                    .add(weather.observedAtMillis).add(weather.place)
+                    .add(weather.weatherCode).add(weather.isDay)
+                    .add(weather.observedAtMillis > 0 && System.currentTimeMillis()
+                            - weather.observedAtMillis > 60 * 60 * 1000L);
+        }
+        if (media == null) {
+            key.add(false);
+        } else {
+            key.add(true).add(media.title).add(media.artist).add(media.album)
+                    .add(media.duration).add(media.playing).add(media.hasTrack)
+                    .add(media.controller != null).add(media.isQuranSession)
+                    .add(media.recitationId)
+                    .add(media.art == null ? 0 : System.identityHashCode(media.art))
+                    .add(media.art == null || media.art.isRecycled()
+                            ? 0 : media.art.getGenerationId());
+        }
+        key.add(audio.installed).add(audio.enabled).add(audio.helpers)
+                .add(audio.car).add(audio.phone).add(audio.status);
+        return key.build();
     }
 
     private void requestQuranPositionData() {
@@ -1155,11 +1255,10 @@ public final class BoardView extends View {
             staticLayer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             staticDirty = true;
         }
-        if (staticDirty || now - staticDrawnAt >= 1000) {
+        if (staticDirty) {
             long staticStarted = SystemClock.uptimeMillis();
             staticLayer.eraseColor(0);
             drawStatic(new Canvas(staticLayer));
-            staticDrawnAt = now;
             staticDirty = false;
             CarDiagnostics.log(getContext(), "Board static build "
                     + (SystemClock.uptimeMillis() - staticStarted) + "ms "
@@ -2415,7 +2514,8 @@ public final class BoardView extends View {
 
     private Bitmap artworkTile(Bitmap art) {
         if (artworkTile != null && !artworkTile.isRecycled()
-                && artworkTileSource == art) {
+                && artworkTileSource == art
+                && artworkTileGeneration == art.getGenerationId()) {
             return artworkTile;
         }
         if (artworkTile != null && !artworkTile.isRecycled()) {
@@ -2424,6 +2524,7 @@ public final class BoardView extends View {
         final int size = 384;
         artworkTile = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         artworkTileSource = art;
+        artworkTileGeneration = art.getGenerationId();
         Canvas tileCanvas = new Canvas(artworkTile);
         RectF square = new RectF(0f, 0f, size, size);
         Path shape = cookiePath(square);

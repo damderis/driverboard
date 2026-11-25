@@ -14,7 +14,15 @@ import java.util.WeakHashMap;
 
 /** Dark Material tonal roles shared by the phone preview and car renderer. */
 public final class BoardColours {
-    private static final Map<Bitmap, Integer> ART_SEEDS = new WeakHashMap<>();
+    private static final Map<Bitmap, ArtSeed> ART_SEEDS = new WeakHashMap<>();
+    private static final class ArtSeed {
+        final int generation;
+        final int seed;
+        ArtSeed(int generation, int seed) {
+            this.generation = generation;
+            this.seed = seed;
+        }
+    }
     private static final LinkedHashMap<Integer, BoardColours> SCHEMES = new LinkedHashMap<>();
     public final int seed;
     public final int surface;
@@ -77,12 +85,13 @@ public final class BoardColours {
         if (("album".equals(source) || "background".equals(source))
                 && artwork != null && !artwork.isRecycled()) {
             synchronized (ART_SEEDS) {
-                Integer cached = ART_SEEDS.get(artwork);
-                if (cached == null) {
-                    cached = artSeed(artwork);
+                ArtSeed cached = ART_SEEDS.get(artwork);
+                int generation = artwork.getGenerationId();
+                if (cached == null || cached.generation != generation) {
+                    cached = new ArtSeed(generation, artSeed(artwork));
                     ART_SEEDS.put(artwork, cached);
                 }
-                seed = cached;
+                seed = cached.seed;
             }
         } else if ("teal".equals(source)) {
             seed = 0xFF0F6E6E;

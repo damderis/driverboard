@@ -111,7 +111,8 @@ public final class BoardScreen extends Screen {
                         && !board.isQuranTransitioning() && !board.isNavigationTransitioning())) {
             return;
         }
-        if (board.isTransitioning() || nanos - lastFrame >= 1_000_000_000L / fps) {
+        if (board.isTransitioning() || board.isNavigationTransitioning()
+                || nanos - lastFrame >= 1_000_000_000L / fps) {
             lastFrame = nanos;
             long start = android.os.SystemClock.elapsedRealtimeNanos();
             drawBoard();
