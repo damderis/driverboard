@@ -9,6 +9,9 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collections;
 
 public final class Store {
     public static final String FULL = "full";
@@ -17,6 +20,30 @@ public final class Store {
     private Store() {}
     public static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences("driveboard", Context.MODE_PRIVATE);
+    }
+
+    public static boolean prayerAlertsEnabled(Context c) {
+        return prefs(c).getBoolean("prayer_alerts_enabled", true);
+    }
+    public static void setPrayerAlertsEnabled(Context c, boolean enabled) {
+        prefs(c).edit().putBoolean("prayer_alerts_enabled", enabled).apply();
+        PrayerAlerts.refresh(c);
+    }
+    public static int prayerAlertLeadMinutes(Context c) {
+        return Math.max(1, Math.min(60, prefs(c).getInt("prayer_alert_lead", 15)));
+    }
+    public static void setPrayerAlertLeadMinutes(Context c, int minutes) {
+        prefs(c).edit().putInt("prayer_alert_lead", Math.max(1, Math.min(60, minutes))).apply();
+        PrayerAlerts.refresh(c);
+    }
+    public static Set<String> prayerAlertsPosted(Context c) {
+        return new HashSet<>(prefs(c).getStringSet("prayer_alerts_posted", Collections.emptySet()));
+    }
+    public static void markPrayerAlertPosted(Context c, String key, String oldestDate) {
+        Set<String> keys = prayerAlertsPosted(c);
+        keys.removeIf(value -> value.compareTo(oldestDate) < 0);
+        keys.add(key);
+        prefs(c).edit().putStringSet("prayer_alerts_posted", keys).apply();
     }
 
     /** Car pages in action-strip order; page 0 keeps the original layout keys. */
@@ -32,7 +59,8 @@ public final class Store {
     }
 
     public static String layoutKey(String mode, int page) {
-        String base = SPLIT.equals(mode) ? "split_layout" : "full_layout";
+        String base = NARROW.equals(mode) ? "narrow_layout"
+                : SPLIT.equals(mode) ? "split_layout" : "full_layout";
         return page == 0 ? base : base + "_p" + page;
     }
 
@@ -40,12 +68,15 @@ public final class Store {
         return layout(context, mode, page(context));
     }
 
+    public static BoardLayout narrowDefault(Context context) {
+        return BoardLayout.narrowDefaults(WidgetData.mediaSnapshot(context).playing,
+                layout(context, SPLIT, 0));
+    }
+
     public static BoardLayout layout(Context context, String mode, int page) {
         if (NARROW.equals(mode)) {
-            // ponytail: the narrow strip always derives from the Drive page; give pages
-            // their own narrow layouts if the e.MAS ever shows a narrow panel with pages.
-            return BoardLayout.narrowDefaults(WidgetData.mediaSnapshot(context).playing,
-                    layout(context, SPLIT, 0));
+            String saved = prefs(context).getString(layoutKey(mode, page), null);
+            return saved == null ? narrowDefault(context) : BoardLayout.fromJson(saved, true);
         }
         SharedPreferences p = prefs(context);
         boolean split = SPLIT.equals(mode);

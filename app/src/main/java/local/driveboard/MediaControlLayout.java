@@ -42,9 +42,23 @@ public final class MediaControlLayout {
     /** Creates bottom-aligned square targets within the supplied tile rectangle. */
     public static MediaControlLayout create(float left, float top, float right,
                                             float bottom, float dpScale) {
+        return create(left, top, right, bottom, dpScale,
+                right - left, bottom - top);
+    }
+
+    /** Card dimensions cap compact visuals independently of screen density. */
+    public static MediaControlLayout create(float left, float top, float right,
+            float bottom, float dpScale, float cardWidth, float cardHeight) {
         float scale = Float.isFinite(dpScale) && dpScale > 0f ? dpScale : 1f;
         float width = Math.max(0f, right - left);
         float height = Math.max(0f, bottom - top);
+        if (isCompact(cardHeight, width, scale)) {
+            float size = Math.max(0f, Math.min(height,
+                    Math.min(cardHeight * .34f, cardWidth * .18f)));
+            size = Math.min(size, width);
+            return new MediaControlLayout(null,
+                    bottomAlignedCentered(left, right, bottom, size), null);
+        }
         float minSize = MIN_TARGET_DP * scale;
         float gap = GAP_DP * scale;
         // Give the controls a comfortable size while reserving room around the row.
@@ -64,6 +78,17 @@ public final class MediaControlLayout {
         Target playPause = square(rowLeft + size + gap, rowTop, size);
         Target next = square(rowLeft + 2f * (size + gap), rowTop, size);
         return new MediaControlLayout(previous, playPause, next);
+    }
+
+    public static boolean isCompact(float cardHeight, float textColumnWidth) {
+        return cardHeight < 110f || textColumnWidth < 120f;
+    }
+
+    public static boolean isCompact(float cardHeight, float textColumnWidth, float dpScale) {
+        float scale = Float.isFinite(dpScale) && dpScale > 0f ? dpScale : 1f;
+        // A dense phone preview may exceed the pixel threshold while still being shorter
+        // than the normal 76dp control plus title headroom. Keep both visible.
+        return isCompact(cardHeight, textColumnWidth) || cardHeight < MIN_TARGET_DP * scale * 1.35f;
     }
 
     private static Target bottomAlignedCentered(float left, float right, float bottom,

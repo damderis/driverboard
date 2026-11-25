@@ -14,6 +14,7 @@ import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -541,9 +542,46 @@ public final class WidgetData {
         SharedPreferences p = Store.prefs(c);
         long checked = p.getLong("prayer_checked_" + z, 0);
         if (!day.equals(p.getString("prayer_day_" + z, ""))
+                || !p.contains("prayer_dated_" + z + "_" + LocalDate.now(MALAYSIA).plusDays(1))
                 || p.getLong("prayer_refresh_" + z, 0) != 0
                 || System.currentTimeMillis() - checked >= 12L * 60 * 60 * 1000) {
             fetch(c.getApplicationContext(), z, day);
+        }
+    }
+    /** Verified, explicitly dated data for alerts, including tomorrow across month/year boundaries. */
+    public static List<PrayerAlertSchedule.Day> prayerAlertDays(Context c) {
+        checkPrayerRefresh(c);
+        List<PrayerAlertSchedule.Day> result = new ArrayList<>();
+        LocalDate today = LocalDate.now(MALAYSIA);
+        SharedPreferences p = Store.prefs(c);
+        String z = zone(c);
+        for (int offset = 0; offset < 2; offset++) {
+            LocalDate date = today.plusDays(offset);
+            String json = p.getString("prayer_dated_" + z + "_" + date, "");
+            try {
+                if (!json.isEmpty()) {
+                    JSONObject entry = new JSONObject(json);
+                    if (date.equals(parsePrayerDate(entry))) {
+                        result.add(new PrayerAlertSchedule.Day(date, parseTimes(entry)));
+                    }
+                } else if (offset == 0 && date.toString().equals(p.getString("prayer_day_" + z, ""))) {
+                    JSONObject entry = new JSONObject(p.getString("prayer_cache_" + z, "")).getJSONArray("prayerTime").getJSONObject(0);
+                    if (date.equals(parsePrayerDate(entry))) {
+                        result.add(new PrayerAlertSchedule.Day(date, parseTimes(entry)));
+                    }
+                }
+            } catch (Exception ignored) {
+                // Invalid or missing dates are unavailable, never borrowed from another day.
+            }
+        }
+        return result;
+    }
+    private static LocalDate parsePrayerDate(JSONObject entry) {
+        String value = entry.optString("date");
+        try {
+            return LocalDate.parse(value);
+        } catch (Exception ignored) {
+            return LocalDate.parse(value, DateTimeFormatter.ofPattern("dd-MMM-yyyy", java.util.Locale.ENGLISH));
         }
     }
     public static PrayerSnapshot prayerSnapshot(Context c) {
@@ -636,48 +674,107 @@ public final class WidgetData {
         lastAttempt = key;
         retryAfter = now + 60_000;
         NETWORK.execute(() -> {
-            HttpURLConnection connection = null;
             try {
-                URL url = new URL(
-                        "https://www.e-solat.gov.my/index.php?r=esolatApi/takwimsolat&period=today&zone="
-                                + zone);
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setConnectTimeout(10_000);
-                connection.setReadTimeout(10_000);
-                if (connection.getResponseCode() != 200) {
-                    return;
-                }
-                String json = readLimited(connection, 128 * 1024);
-                JSONObject root = new JSONObject(json);
-                if (!"OK!".equals(root.optString("status"))
-                        || !zone.equals(root.optString("zone"))) {
-                    return;
+                JSONObject root;
+                try {
+                    root = fetchPrayerResponse(zone, day, true);
+                } catch (Exception rangeError) {
+                    // Keep the original current-day GET available when range requests fail.
+                    root = fetchPrayerResponse(zone, day, false);
                 }
                 JSONArray entries = root.getJSONArray("prayerTime");
-                if (entries.length() != 1) {
+                SharedPreferences.Editor edit = Store.prefs(c).edit();
+                JSONObject todayEntry = null;
+                LocalDate requested = LocalDate.parse(day);
+                for (int i = 0; i < entries.length(); i++) {
+                    JSONObject entry = entries.getJSONObject(i);
+                    LocalDate date = parsePrayerDate(entry);
+                    if (!date.equals(requested) && !date.equals(requested.plusDays(1))) {
+                        continue;
+                    }
+                    parseTimes(entry);
+                    edit.putString("prayer_dated_" + zone + "_" + date, entry.toString());
+                    if (date.equals(requested)) {
+                        todayEntry = entry;
+                    }
+                }
+                if (todayEntry == null || !day.equals(LocalDate.now(MALAYSIA).toString())) {
                     return;
                 }
-                parseTimes(entries.getJSONObject(0));
-                if (!day.equals(LocalDate.now(MALAYSIA).toString())
-                        || !root.optString("serverTime").startsWith(day)) {
-                    return;
-                }
-                Store.prefs(c).edit().putString("prayer_cache_" + zone, json)
+                JSONObject todayRoot = new JSONObject(root.toString());
+                todayRoot.put("prayerTime", new JSONArray().put(todayEntry));
+                edit.putString("prayer_cache_" + zone, todayRoot.toString())
                         .putString("prayer_day_" + zone, day)
                         .putLong("prayer_checked_" + zone, System.currentTimeMillis())
-                        .remove("prayer_refresh_" + zone).apply();
+                        .remove("prayer_refresh_" + zone);
+                // Keep only the current two-day window for this zone.
+                String prefix = "prayer_dated_" + zone + "_";
+                for (String cachedKey : Store.prefs(c).getAll().keySet()) {
+                    if (cachedKey.startsWith(prefix) && cachedKey.substring(prefix.length()).compareTo(day) < 0) {
+                        edit.remove(cachedKey);
+                    }
+                }
+                edit.apply();
+                PrayerAlerts.refresh(c);
             } catch (Exception ignored) {
                 // Preserve the last verified response.
             } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                }
                 synchronized (WidgetData.class) {
                     inFlight = "";
                 }
             }
         });
     }
+    /** Fetch and validate the entire response before allowing any cache mutation. */
+    private static JSONObject fetchPrayerResponse(String zone, String day, boolean range)
+            throws Exception {
+        String period = range ? "duration" : "today";
+        URL url = new URL("https://www.e-solat.gov.my/index.php?r=esolatApi/takwimsolat&period="
+                + period + "&zone=" + zone);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        try {
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(10_000);
+            if (range) {
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                String body = "datestart=" + day + "&dateend=" + LocalDate.parse(day).plusDays(1);
+                try (java.io.OutputStream output = connection.getOutputStream()) {
+                    output.write(body.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            if (connection.getResponseCode() != 200) {
+                throw new java.io.IOException("Prayer response HTTP " + connection.getResponseCode());
+            }
+            JSONObject root = new JSONObject(readLimited(connection, 128 * 1024));
+            if (!"OK!".equals(root.optString("status"))
+                    || !zone.equals(root.optString("zone"))) {
+                throw new java.io.IOException("Prayer response status or zone mismatch");
+            }
+            if (!range && !root.optString("serverTime").startsWith(day)) {
+                throw new java.io.IOException("Prayer response server date mismatch");
+            }
+            JSONArray entries = root.getJSONArray("prayerTime");
+            LocalDate requested = LocalDate.parse(day);
+            boolean hasToday = false;
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject entry = entries.getJSONObject(i);
+                LocalDate date = parsePrayerDate(entry);
+                if (date.equals(requested) || (range && date.equals(requested.plusDays(1)))) {
+                    parseTimes(entry);
+                    hasToday |= date.equals(requested);
+                }
+            }
+            if (!hasToday) {
+                throw new java.io.IOException("Prayer response missing requested date");
+            }
+            return root;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     static String readLimited(HttpURLConnection connection, int limit) throws java.io.IOException {
         try (java.io.InputStream stream = connection.getInputStream();
                 java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream()) {

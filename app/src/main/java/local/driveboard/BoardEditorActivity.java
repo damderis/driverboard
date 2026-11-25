@@ -31,7 +31,7 @@ import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Landscape, edge-to-edge editor for the two independent car screen layouts. */
+/** Landscape, edge-to-edge editor for the three independent car screen layouts. */
 public final class BoardEditorActivity extends AppCompatActivity {
     public static final String EXTRA_MODE = "editor_mode";
     private static final int HISTORY_LIMIT = 40;
@@ -73,7 +73,8 @@ public final class BoardEditorActivity extends AppCompatActivity {
         super.onCreate(state);
         String requested = state == null ? getIntent().getStringExtra(EXTRA_MODE)
                 : state.getString(EXTRA_MODE);
-        mode = Store.SPLIT.equals(requested) ? Store.SPLIT : Store.FULL;
+        mode = Store.NARROW.equals(requested) ? Store.NARROW
+                : Store.SPLIT.equals(requested) ? Store.SPLIT : Store.FULL;
         page = state == null ? Store.page(this) : state.getInt("editor_page");
         layout = Store.layout(this, mode, page);
         ink = color(com.google.android.material.R.attr.colorOnSurface);
@@ -252,13 +253,17 @@ public final class BoardEditorActivity extends AppCompatActivity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(52), 1);
         params.rightMargin = dp(12);
         parent.addView(group, params);
-        MaterialButton full = modeButton(R.string.full_screen);
-        MaterialButton split = modeButton(R.string.split_screen);
+        MaterialButton full = modeButton(R.string.editor_mode_full);
+        MaterialButton split = modeButton(R.string.editor_mode_split);
+        MaterialButton narrow = modeButton(R.string.editor_mode_narrow);
         group.addView(full, new LinearLayout.LayoutParams(0, dp(46), 1));
         group.addView(split, new LinearLayout.LayoutParams(0, dp(46), 1));
-        group.check(Store.SPLIT.equals(mode) ? split.getId() : full.getId());
+        group.addView(narrow, new LinearLayout.LayoutParams(0, dp(46), 1));
+        group.check(Store.NARROW.equals(mode) ? narrow.getId()
+                : Store.SPLIT.equals(mode) ? split.getId() : full.getId());
         group.addOnButtonCheckedListener((buttons, checkedId, checked) -> {
-            if (checked) switchMode(checkedId == split.getId() ? Store.SPLIT : Store.FULL);
+            if (checked) switchMode(checkedId == narrow.getId() ? Store.NARROW
+                    : checkedId == split.getId() ? Store.SPLIT : Store.FULL);
         });
     }
 
@@ -282,8 +287,9 @@ public final class BoardEditorActivity extends AppCompatActivity {
         int availableW = canvasHolder.getWidth() - dp(24);
         int availableH = canvasHolder.getHeight() - dp(16);
         if (availableW <= 0 || availableH <= 0) return;
-        int frameW = Math.max(1, Store.prefs(this).getInt(mode + "_width", 1920));
-        int frameH = Math.max(1, Store.prefs(this).getInt(mode + "_height", 1080));
+        int frameW = Math.max(1, Store.prefs(this).getInt(mode + "_width", Store.NARROW.equals(mode) ? 600
+                : Store.SPLIT.equals(mode) ? 1200 : 1920));
+        int frameH = Math.max(1, Store.prefs(this).getInt(mode + "_height", Store.FULL.equals(mode) ? 1080 : 1000));
         float scale = Math.min(availableW / (float) frameW, availableH / (float) frameH);
         int fittedW = Math.max(1, Math.round(frameW * scale));
         int fittedH = Math.max(1, Math.round(frameH * scale));
@@ -372,7 +378,8 @@ public final class BoardEditorActivity extends AppCompatActivity {
                 .setNegativeButton(R.string.cancel_action, null)
                 .setPositiveButton(R.string.reset_action, (dialog, which) -> {
                     String before = layout.toJson();
-                    layout = BoardLayout.pageDefaults(page, Store.SPLIT.equals(mode));
+                    layout = Store.NARROW.equals(mode) ? Store.narrowDefault(this)
+                            : BoardLayout.pageDefaults(page, Store.SPLIT.equals(mode));
                     selected = null;
                     board.selectCard(null);
                     persist();

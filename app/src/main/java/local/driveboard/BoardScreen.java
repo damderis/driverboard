@@ -108,7 +108,7 @@ public final class BoardScreen extends Screen {
         frameScheduled = false;
         if (!started || browserMode || surface == null || !surface.isValid()
                 || (!board.isMediaPlaying() && !board.isTransitioning()
-                        && !board.isQuranTransitioning())) {
+                        && !board.isQuranTransitioning() && !board.isNavigationTransitioning())) {
             return;
         }
         if (board.isTransitioning() || nanos - lastFrame >= 1_000_000_000L / fps) {
@@ -128,7 +128,7 @@ public final class BoardScreen extends Screen {
     private void scheduleFrame() {
         if (started && !browserMode && surface != null && surface.isValid()
                 && (board.isMediaPlaying() || board.isTransitioning()
-                        || board.isQuranTransitioning()) && !frameScheduled) {
+                        || board.isQuranTransitioning() || board.isNavigationTransitioning()) && !frameScheduled) {
             frameScheduled = true;
             android.view.Choreographer.getInstance().postFrameCallback(frameCallback);
         }
@@ -267,6 +267,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = true;
+        board.startNavigation();
         prefs.registerOnSharedPreferenceChangeListener(prefsListener);
         final long epoch = ++callbackEpoch;
         surfaceCallback = new SurfaceCallback() {
@@ -348,6 +349,7 @@ public final class BoardScreen extends Screen {
             return;
         }
         started = false;
+        board.stopNavigation();
         closeBrowser();
         board.releaseMediaControls();
         board.cancelLayoutTransition();
@@ -894,6 +896,9 @@ public final class BoardScreen extends Screen {
         }
         float localX = x - lastDrawArea.left;
         float localY = y - lastDrawArea.top;
+        if (board.hitNavigation(localX, localY)) {
+            return;
+        }
         if (board.hitMediaControl(localX, localY)) {
             return;
         }

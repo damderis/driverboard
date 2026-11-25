@@ -38,7 +38,11 @@ public final class CarDiagnostics extends Application {
             }
             int previous = carConnectionType;
             carConnectionType = type;
+            if (previous == CarConnection.CONNECTION_TYPE_PROJECTION && type != previous) {
+                NavigationRepository.get().resetDrive();
+            }
             boolean projection = type == CarConnection.CONNECTION_TYPE_PROJECTION;
+            PrayerAlerts.connectionChanged(this, projection);
             if (resumeGate.connectionChanged(projection)) {
                 int generation = ++connectionGeneration;
                 resumeHandler.postDelayed(() -> {

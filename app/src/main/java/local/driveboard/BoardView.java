@@ -32,6 +32,175 @@ import java.util.Map;
 
 /** Shared proportional renderer for the phone preview and car surface. */
 public final class BoardView extends View {
+    private final NavigationRepository.Listener navigationListener = () -> {
+        updateNavigation();
+        requestControlDraw();
+        scheduleFrame();
+    };
+    private NavigationState navigationState;
+    private final RectF navigationBounds = new RectF();
+    private boolean navigationListening;
+    private boolean navigationShown;
+    private float navigationFrom;
+    private long navigationAt;
+    private boolean navigationPressed;
+
+    public void startNavigation() {
+        if (!navigationListening) {
+            navigationListening = true;
+            NavigationRepository.get().addListener(navigationListener);
+        }
+        updateNavigation();
+    }
+
+    public void stopNavigation() {
+        navigationListening = false;
+        NavigationRepository.get().removeListener(navigationListener);
+    }
+
+    private float navigationAlpha() {
+        float target = navigationShown ? 1f : 0f;
+        if (navigationAt == 0) return target;
+        return navigationFrom + (target - navigationFrom)
+                * BoardTransition.progress(SystemClock.uptimeMillis() - navigationAt);
+    }
+
+    private void updateNavigation() {
+        NavigationState next = NavigationRepository.get().state();
+        boolean shown = !editing && next != null
+                && Store.prefs(getContext()).getBoolean("navigation_overlay", true);
+        if (shown != navigationShown) {
+            navigationFrom = navigationAlpha();
+            navigationShown = shown;
+            navigationAt = SystemClock.uptimeMillis();
+        }
+        if (next != null) navigationState = next;
+    }
+
+    public boolean isNavigationTransitioning() {
+        return navigationAt != 0 && SystemClock.uptimeMillis() - navigationAt
+                < BoardTransition.DURATION_MS;
+    }
+
+    public boolean hitNavigation(float x, float y) {
+        updateNavigation();
+        if (!navigationShown || !navigationBounds.contains(x, y)) return false;
+        NavigationRepository.get().toggleCollapsed(getContext());
+        return true;
+    }
+
+    private void drawNavigation(Canvas canvas) {
+        updateNavigation();
+        float alpha = navigationAlpha();
+        if (navigationState == null || alpha <= 0f || editing) {
+            navigationBounds.setEmpty();
+            return;
+        }
+        NavigationState nav = navigationState;
+        float scale = Math.max(.5f, Math.min(getWidth() / 700f, getHeight() / 600f));
+        float margin = edge();
+        float bannerHeight = Math.min(getHeight() - 2 * margin,
+                Math.max(92f * scale, getHeight() * .20f));
+        boolean collapsed = NavigationRepository.get().collapsed();
+        float height = collapsed ? bannerHeight * .48f
+                : nav.distance.isEmpty() ? bannerHeight * .78f : bannerHeight;
+        float width = Store.FULL.equals(mode) ? getWidth() * .62f
+                : getWidth() - 2 * margin;
+        if (collapsed) width = Math.min(getWidth() - 2 * margin, 240f * scale);
+        float left = collapsed ? margin : (getWidth() - width) / 2f;
+        float top = margin - (1f - alpha) * 20f * scale;
+        navigationBounds.set(left, top, left + width, top + height);
+        RectF r = navigationBounds;
+        int save = canvas.saveLayerAlpha(r.left - 8, r.top - 8,
+                r.right + 8, r.bottom + 8, Math.round(alpha * 255));
+        Path shape = new Path();
+        shape.addRoundRect(r, height * .24f, height * .24f, Path.Direction.CW);
+        drawGlassSurface(canvas, shape, r, colours.surfaceContainerHigh);
+        // The banner floats over busy cards: a near-opaque layer keeps the directions legible.
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor((colours.surfaceContainerHigh & 0x00FFFFFF) | 0xFA000000);
+        canvas.drawPath(shape, paint);
+        float pad = Math.min(18f * scale, height * .14f);
+        float diameter = Math.min(height - 2 * pad, 64f * scale);
+        float cx = r.left + pad + diameter / 2f;
+        float cy = r.centerY();
+        paint.setColor(colours.primaryContainer);
+        canvas.drawCircle(cx, cy, diameter / 2f, paint);
+        if (nav.arrow != null) {
+            float half = diameter * .34f;
+            paint.setColor(0xFFFFFFFF);
+            paint.setFilterBitmap(true);
+            paint.setColorFilter(new android.graphics.PorterDuffColorFilter(
+                    colours.onSurface, android.graphics.PorterDuff.Mode.SRC_IN));
+            canvas.drawBitmap(nav.arrow, null,
+                    new RectF(cx - half, cy - half, cx + half, cy + half), paint);
+            paint.setColorFilter(null);
+        } else {
+            float half = diameter * .22f;
+            paint.setColor(colours.onSurface);
+            paint.setStrokeWidth(Math.max(2f, 3f * scale));
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStyle(Paint.Style.STROKE);
+            canvas.drawLine(cx, cy + half, cx, cy - half, paint);
+            canvas.drawLine(cx, cy - half, cx - half * .7f, cy - half * .3f, paint);
+            canvas.drawLine(cx, cy - half, cx + half * .7f, cy - half * .3f, paint);
+            paint.setStyle(Paint.Style.FILL);
+        }
+        float x = cx + diameter / 2f + pad;
+        float titleSize = Math.min(28f * scale, height * (collapsed ? .42f : .25f));
+        float etaWidth = collapsed || nav.eta.isEmpty() ? 0f : width * .25f;
+        float textWidth = Math.max(1f, r.right - pad - etaWidth - x);
+        if (collapsed) {
+            text(canvas, nav.distance.isEmpty() ? nav.instruction : nav.distance,
+                    x, r.centerY() + titleSize * .35f, titleSize, colours.onSurface,
+                    Fonts.semibold(getContext()), textWidth);
+        } else {
+            // Distance is the headline with the instruction under it; without a distance
+            // the instruction itself is the headline. The block is centred vertically.
+            boolean hasDistance = !nav.distance.isEmpty();
+            float labelSize = Math.min(19f * scale, titleSize * .72f);
+            TextPaint label = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            label.setColor(hasDistance ? colours.onSurfaceVariant : colours.onSurface);
+            label.setTypeface(hasDistance ? Fonts.regular(getContext()) : Fonts.semibold(getContext()));
+            label.setTextSize(hasDistance ? labelSize : Math.min(titleSize * .86f, 24f * scale));
+            StaticLayout lines = StaticLayout.Builder.obtain(nav.instruction, 0,
+                            nav.instruction.length(), label, Math.max(1, Math.round(textWidth)))
+                    .setIncludePad(false).setMaxLines(hasDistance ? 1 : 2)
+                    .setEllipsize(TextUtils.TruncateAt.END).build();
+            float headline = hasDistance ? titleSize * 1.2f : 0f;
+            float blockTop = r.centerY() - (headline + lines.getHeight()) / 2f - pad * .15f;
+            if (hasDistance) {
+                text(canvas, nav.distance, x, blockTop + titleSize, titleSize,
+                        colours.onSurface, Fonts.semibold(getContext()), textWidth);
+            }
+            canvas.save();
+            canvas.clipRect(x, r.top, x + textWidth, r.bottom - pad);
+            canvas.translate(x, blockTop + headline);
+            lines.draw(canvas);
+            canvas.restore();
+            if (etaWidth > 0f) {
+                float etaSize = Math.min(labelSize, 18f * scale);
+                Paint etaPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                etaPaint.setTypeface(Fonts.semibold(getContext()));
+                etaPaint.setTextSize(etaSize);
+                float etaX = r.right - pad - Math.min(etaWidth, etaPaint.measureText(nav.eta));
+                text(canvas, nav.eta, etaX, r.centerY() + etaSize * .35f - pad * .15f, etaSize,
+                        colours.primary, Fonts.semibold(getContext()), etaWidth);
+            }
+            float stroke = Math.max(1.5f, 2.5f * scale);
+            float lineY = r.bottom - stroke * 1.4f;
+            paint.setStrokeWidth(stroke);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setColor((colours.primary & 0x00FFFFFF) | 0x4D000000);
+            canvas.drawLine(r.left + pad, lineY, r.right - pad, lineY, paint);
+            paint.setColor(colours.primary);
+            canvas.drawLine(r.left + pad, lineY,
+                    r.left + pad + (width - 2 * pad) * nav.progress, lineY, paint);
+        }
+        paint.setAlpha(255);
+        canvas.restoreToCount(save);
+    }
+
     private int CREAM = 0xFFF4EFE4;
     private int SAGE = 0xFFA9C2BD;
     private int BRASS = 0xFFC8A55A;
@@ -482,7 +651,7 @@ public final class BoardView extends View {
     private MediaControlLayout mediaControlLayout(RectF r) {
         float artSize = Math.min(r.height() * .95f, r.width() * .45f);
         return MediaControlLayout.create(r.left + artSize + 10f * unit(), r.top,
-                r.right, r.bottom, controlDpScale());
+                r.right, r.bottom, controlDpScale(), r.width(), r.height());
     }
 
     private MediaControlLayout lyricsControlLayout() {
@@ -612,7 +781,7 @@ public final class BoardView extends View {
             return;
         }
         frameScheduled = true;
-        if (isMediaPlaying() || isTransitioning() || isQuranTransitioning()) {
+        if (isMediaPlaying() || isTransitioning() || isQuranTransitioning() || isNavigationTransitioning()) {
             Choreographer.getInstance().postFrameCallback(frameCallback);
         } else {
             Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, 1000);
@@ -622,6 +791,7 @@ public final class BoardView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        startNavigation();
         scheduleFrame();
     }
 
@@ -642,6 +812,7 @@ public final class BoardView extends View {
             artworkTile = null;
             artworkTileSource = null;
         }
+        stopNavigation();
         super.onDetachedFromWindow();
     }
 
@@ -697,6 +868,7 @@ public final class BoardView extends View {
         if (dragging == null && !editorLayout) {
             layout = Store.layout(getContext(), mode);
         }
+        updateNavigation();
         words = AppLocale.wrap(getContext());
         Date now = new Date();
         time = android.text.format.DateFormat.getTimeFormat(words).format(now);
@@ -971,6 +1143,7 @@ public final class BoardView extends View {
         if (isTransitioning()) {
             drawTransition(canvas, now);
             drawMediaControls(canvas);
+            drawNavigation(canvas);
             recordDrawTime(drawStarted);
             return;
         }
@@ -1002,6 +1175,7 @@ public final class BoardView extends View {
             drawProgress(canvas);
         }
         drawMediaControls(canvas);
+        drawNavigation(canvas);
         recordDrawTime(drawStarted);
     }
 
@@ -2321,6 +2495,14 @@ public final class BoardView extends View {
             return;
         }
         MediaControlLayout controls = mediaControlLayout(r);
+        if (MediaControlLayout.isCompact(r.height(), width, controlDpScale())) {
+            float compactSize = Math.min(19f * unit(), r.height() * .25f);
+            float titleBottom = Math.min(controls.playPause.top - 3f * unit(),
+                    r.top + compactSize * 1.3f);
+            text(canvas, title, x, Math.max(r.top + compactSize, titleBottom), compactSize,
+                    playing ? CREAM : SAGE, Fonts.semibold(getContext()), width);
+            return;
+        }
         float textTop = r.top;
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setTypeface(Fonts.semibold(getContext()));
@@ -2430,6 +2612,7 @@ public final class BoardView extends View {
             float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
             float x = r.left + artworkSize + 10f * unit();
             float width = Math.max(1f, r.right - x);
+            if (MediaControlLayout.isCompact(r.height(), width, controlDpScale())) continue;
             float progress = Math.max(0f, Math.min(1f,
                     (float) media.estimatedPositionMs() / media.duration));
             float lineY = option(card, "show_controls") ? mediaControlLayout(r).playPause.top - 5f * unit() : r.bottom - 3f * unit();
@@ -2769,7 +2952,22 @@ public final class BoardView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (!editing || Store.NARROW.equals(mode) || getWidth() == 0 || getHeight() == 0) {
+        if (!editing && event.getActionMasked() == MotionEvent.ACTION_DOWN
+                && navigationShown && navigationBounds.contains(event.getX(), event.getY())) {
+            navigationPressed = true;
+            return true;
+        }
+        if (navigationPressed) {
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                navigationPressed = false;
+                hitNavigation(event.getX(), event.getY());
+                performClick();
+            } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                navigationPressed = false;
+            }
+            return true;
+        }
+        if (!editing || getWidth() == 0 || getHeight() == 0) {
             return false;
         }
         switch (event.getActionMasked()) {

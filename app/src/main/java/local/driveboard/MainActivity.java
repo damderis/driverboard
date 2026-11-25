@@ -47,6 +47,8 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final int PICK_BACKGROUND = 20;
     private static final int REQUEST_PARKED_LOCATION = 8;
+    private static final int REQUEST_PRAYER_NOTIFICATIONS = 9;
+    private TextView prayerAlertStatus;
     private final ExecutorService pictureWorker = Executors.newSingleThreadExecutor();
     private ImageView backgroundThumbnail;
     private TextView backgroundPlaceholder;
@@ -133,6 +135,10 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         }
         BackgroundStore.cleanupLegacy(this);
         build();
+        if (Store.prayerAlertsEnabled(this)
+                && !Store.prefs(this).getBoolean("prayer_alert_permission_asked", false)) {
+            requestPrayerNotificationPermission();
+        }
     }
 
     @Override
@@ -192,8 +198,10 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         settingsCard.addView(card);
         content.addView(settingsCard, new LinearLayout.LayoutParams(-1, -2));
         addPrayerRow(card);
+        addPrayerAlertsRow(card);
         addParkedDetectionRow(card);
         addMediaRow(card);
+        addNavigationRow(card);
         addWeatherRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
@@ -319,6 +327,13 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         prayer.addView(zone, new LinearLayout.LayoutParams(-1, -2));
         zoneDetail = detail(zone, "");
         prayer.setOnClickListener(view -> pickZone());
+        if (BuildConfig.DEBUG) {
+            prayer.setOnLongClickListener(view -> {
+                PrayerAlerts.postDebugSample(this);
+                Toast.makeText(this, R.string.prayer_alert_sample, Toast.LENGTH_SHORT).show();
+                return true;
+            });
+        }
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
@@ -340,6 +355,78 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         actions.addView(change);
     }
 
+    private void addPrayerAlertsRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        item.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text(getString(R.string.prayer_alerts), 15, true);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        MaterialSwitch toggle = new MaterialSwitch(this);
+        toggle.setContentDescription(getString(R.string.prayer_alerts));
+        toggle.setChecked(Store.prayerAlertsEnabled(this));
+        heading.addView(toggle);
+        item.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        TextView hint = detail(item, getString(R.string.prayer_alert_hint));
+        hint.setSingleLine(true);
+        hint.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        prayerAlertStatus = detail(item, "");
+        prayerAlertStatus.setMinHeight(dp(48));
+        prayerAlertStatus.setGravity(Gravity.CENTER_VERTICAL);
+        prayerAlertStatus.setOnClickListener(view -> {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    && shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                requestPrayerNotificationPermission();
+            } else {
+                startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
+            }
+        });
+        MaterialButton lead = pill(getString(R.string.prayer_alert_lead,
+                Store.prayerAlertLeadMinutes(this)));
+        item.addView(lead);
+        lead.setOnClickListener(view -> {
+            int[] values = {5, 10, 15, 30};
+            String[] labels = new String[values.length];
+            int selected = 2;
+            for (int i = 0; i < values.length; i++) {
+                labels[i] = getString(R.string.prayer_alert_lead, values[i]);
+                if (values[i] == Store.prayerAlertLeadMinutes(this)) selected = i;
+            }
+            new MaterialAlertDialogBuilder(this).setTitle(R.string.prayer_alert_lead_title)
+                    .setSingleChoiceItems(labels, selected, (dialog, index) -> {
+                        Store.setPrayerAlertLeadMinutes(this, values[index]);
+                        lead.setText(labels[index]);
+                        PrayerAlerts.refresh(this);
+                        dialog.dismiss();
+                    }).show();
+        });
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            Store.setPrayerAlertsEnabled(this, checked);
+            if (checked) requestPrayerNotificationPermission();
+            PrayerAlerts.refresh(this);
+            updatePrayerAlertState();
+        });
+        updatePrayerAlertState();
+    }
+
+    private void requestPrayerNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            Store.prefs(this).edit().putBoolean("prayer_alert_permission_asked", true).apply();
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_PRAYER_NOTIFICATIONS);
+        }
+    }
+
+    private void updatePrayerAlertState() {
+        if (prayerAlertStatus == null) return;
+        boolean allowed = PrayerAlerts.canNotify(this);
+        prayerAlertStatus.setText(!Store.prayerAlertsEnabled(this) ? R.string.prayer_alert_off
+                : allowed ? R.string.prayer_alert_ready : R.string.prayer_alert_denied);
+    }
+
     private void addMediaRow(LinearLayout card) {
         LinearLayout media = row(card, true);
         description(media, R.string.now_playing);
@@ -353,6 +440,24 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         grant.setOnClickListener(view -> startActivity(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         media.addView(grant);
+    }
+
+    private void addNavigationRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        LinearLayout labels = column();
+        labels.addView(text(getString(R.string.navigation_overlay), 15, true));
+        TextView hint = detail(labels, getString(R.string.navigation_overlay_hint));
+        hint.setSingleLine(true);
+        hint.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        MaterialSwitch toggle = new MaterialSwitch(this);
+        toggle.setContentDescription(getString(R.string.navigation_overlay));
+        toggle.setChecked(Store.prefs(this).getBoolean("navigation_overlay", true));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            Store.prefs(this).edit().putBoolean("navigation_overlay", checked).apply();
+            board.refresh();
+        });
+        item.addView(toggle);
     }
 
     private void addParkedDetectionRow(LinearLayout card) {
@@ -721,6 +826,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     }
 
     private void updateStates() {
+        updatePrayerAlertState();
         boolean access = WidgetData.hasMediaAccess(this);
         allowed.setVisibility(access ? View.VISIBLE : View.GONE);
         grant.setVisibility(access ? View.GONE : View.VISIBLE);
@@ -803,6 +909,11 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
     @Override
     public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
+        if (request == REQUEST_PRAYER_NOTIFICATIONS) {
+            updatePrayerAlertState();
+            PrayerAlerts.refresh(this);
+            return;
+        }
         if (request == REQUEST_PARKED_LOCATION) {
             parkedLocationDenied = !hasParkedLocationPermission();
             updateParkedLocationState();

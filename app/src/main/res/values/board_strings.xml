@@ -18,4 +18,20 @@
     <string name="media_playing">Playing</string>
     <string name="media_nothing_playing">Nothing playing</string>
     <string name="media_start_music">Start music on your phone</string>
+    <string name="navigation_overlay">Navigation overlay</string>
+    <string name="navigation_overlay_hint">Shows Google Maps or Waze directions over the board.</string>
+    <string name="editor_mode_full">Full</string>
+    <string name="editor_mode_split">Split</string>
+    <string name="editor_mode_narrow">Narrow</string>
+    <string name="prayer_alerts">Prayer alerts in the car</string>
+    <string name="prayer_alert_hint">Alerts appear over Peta/Google Maps while connected.</string>
+    <string name="prayer_alert_lead">%1$d minutes before</string>
+    <string name="prayer_alert_lead_title">Reminder lead time</string>
+    <string name="prayer_alert_off">Alerts off</string>
+    <string name="prayer_alert_ready">Notifications allowed</string>
+    <string name="prayer_alert_denied">Notifications blocked · tap to allow</string>
+    <string name="prayer_alert_channel">Waktu solat</string>
+    <string name="prayer_alert_before">%1$s in %2$d min</string>
+    <string name="prayer_alert_at">%1$s time</string>
+    <string name="prayer_alert_sample">Sample prayer alert requested</string>
 </resources>
