@@ -16,6 +16,9 @@ public class DriveBoardService extends CarAppService {
         return false;
     }
 
+    static final String EXTRA_OPEN = "local.driveboard.OPEN";
+    static final String OPEN_WEB = "web";
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -63,7 +66,20 @@ public class DriveBoardService extends CarAppService {
                 CarDiagnostics.log(DriveBoardService.this, "Session screen API="
                         + getCarContext().getCarAppApiLevel());
                 boardScreen = new BoardScreen(getCarContext(), weather());
+                handleOpen(intent);
                 return boardScreen;
+            }
+
+            @Override
+            public void onNewIntent(@NonNull android.content.Intent intent) {
+                handleOpen(intent);
+            }
+
+            private void handleOpen(android.content.Intent intent) {
+                if (boardScreen != null && OPEN_WEB.equals(intent.getStringExtra(EXTRA_OPEN))) {
+                    CarDiagnostics.log(DriveBoardService.this, "Open web from DriveBoard Peta");
+                    boardScreen.openWebWhenReady();
+                }
             }
 
             @Override

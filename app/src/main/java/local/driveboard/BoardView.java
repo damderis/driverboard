@@ -454,8 +454,49 @@ public final class BoardView extends View {
         displayLyrics = document == null ? null : document.estimated(displayLyricsDuration);
         displayedLyric = Integer.MIN_VALUE;
         clearLyricBlocks();
-        if (lyricsVisible) {
-            invalidateStatic();
+        // A tall music card moves its artwork up when lyrics arrive.
+        invalidateStatic();
+    }
+
+    /** Tall music cards get a header (art + title) with lyrics, or a centred title, below. */
+    private boolean tallMediaCard(RectF r) {
+        return r.height() > r.width() * .55f && r.height() > 180f * Math.max(1f, unit() * .5f);
+    }
+
+    /** Timed song lyrics to show inside a tall music card (not Quran, not the lyrics page). */
+    private boolean cardLyrics() {
+        return !lyricsVisible && displayLyrics != null && displayLyrics.isTimed()
+                && !displayLyrics.isEmpty() && media != null && !media.isQuranSession;
+    }
+
+    private RectF cardLyricsArea(RectF r) {
+        float art = Math.min(r.height() * .26f, r.width() * .24f);
+        float timeline = mediaControlLayout(r).playPause.top - 5f * unit();
+        return new RectF(r.left, r.top + art + 12f * unit(), r.right, timeline - 10f * unit());
+    }
+
+    private void drawCardLyrics(Canvas canvas, RectF r) {
+        RectF area = cardLyricsArea(r);
+        int index = lyricsLineIndex();
+        if (area.height() < 20f * unit() || index < 0) return;
+        LyricsDocument.Line[] lines = displayLyrics.lines;
+        float size = Math.min(17f * unit(), area.height() * .22f);
+        TextPaint current = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        current.setTypeface(Fonts.semibold(getContext()));
+        current.setTextSize(size);
+        current.setColor(BRASS);
+        StaticLayout now = StaticLayout.Builder.obtain(lines[index].text, 0,
+                        lines[index].text.length(), current, Math.max(1, Math.round(area.width())))
+                .setIncludePad(false).setMaxLines(2).setEllipsize(TextUtils.TruncateAt.END).build();
+        float y = area.centerY() - now.getHeight() / 2f - size * .5f;
+        canvas.save();
+        canvas.clipRect(area);
+        canvas.translate(area.left, y);
+        now.draw(canvas);
+        canvas.restore();
+        if (index + 1 < lines.length) {
+            text(canvas, lines[index + 1].text, area.left, y + now.getHeight() + size * 1.25f,
+                    size * .78f, SAGE, Fonts.regular(getContext()), area.width());
         }
     }
 
@@ -683,12 +724,42 @@ public final class BoardView extends View {
                 r.right, r.bottom, controlDpScale(), r.width(), r.height());
     }
 
+    /**
+     * Lyrics page areas: [0] song column card, [1] lyrics card, [2] song content, [3] lyrics content.
+     * Beside Android Auto's panel the song column sits under the panel, as the weather card does.
+     */
+    private RectF[] lyricsAreas() {
+        float w = getWidth();
+        float h = getHeight();
+        float pad = 6f * unit();
+        if (panelColumn()) {
+            float gutter = panelLeft * 2f;
+            RectF song = new RectF(panelLeft, Math.min(panelBottom + gutter, h - panelTop - 1f),
+                    panelRight, h - panelTop);
+            RectF text = new RectF(Math.max(panelRight + gutter, panelStableLeft), panelTop,
+                    w - panelLeft, h - panelTop);
+            float inner = Math.max(pad * 2f, Math.min(song.width(), song.height()) * .06f);
+            return new RectF[] {song, text,
+                    new RectF(song.left + inner, song.top + inner, song.right - inner, song.bottom - inner),
+                    new RectF(text.left + inner * 1.5f, text.top + inner, text.right - inner, text.bottom - inner)};
+        }
+        float inset = Math.max(12f * unit(), w * .035f);
+        RectF content = new RectF(inset, inset, w - inset, h - inset);
+        float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
+        RectF songContent = new RectF(content.left, content.top, content.left + leftWidth, content.bottom);
+        RectF textContent = new RectF(content.left + leftWidth
+                + Math.max(16f * unit(), content.width() * .05f), content.top, content.right, content.bottom);
+        RectF song = new RectF(content.left - pad, content.top - pad, songContent.right + pad,
+                content.bottom + pad);
+        RectF text = new RectF(song.right + pad, content.top - pad, content.right + pad,
+                content.bottom + pad);
+        return new RectF[] {song, text, songContent, textContent};
+    }
+
     private MediaControlLayout lyricsControlLayout() {
-        float inset = Math.max(12f * unit(), getWidth() * .035f);
-        float height = getHeight() - 2f * inset;
-        float width = Math.min(height * .50f, (getWidth() - 2f * inset) * .31f);
-        return MediaControlLayout.create(inset, inset, inset + width,
-                getHeight() - inset, controlDpScale());
+        RectF song = lyricsAreas()[2];
+        return MediaControlLayout.create(song.left, song.top, song.right, song.bottom,
+                controlDpScale());
     }
 
     private MediaControlLayout currentControlLayout() {
@@ -713,9 +784,9 @@ public final class BoardView extends View {
             return;
         }
         if (lyricsVisible && media.duration > 0) {
-            float inset = Math.max(12f * unit(), getWidth() * .035f);
-            float width = Math.min((getHeight() - 2f * inset) * .50f,
-                    (getWidth() - 2f * inset) * .31f);
+            RectF song = lyricsAreas()[2];
+            float inset = song.left;
+            float width = song.width();
             float y = targets.playPause.top - 5f * unit();
             float progress = Math.max(0f, Math.min(1f,
                     (float) media.estimatedPositionMs() / media.duration));
@@ -1730,63 +1801,54 @@ public final class BoardView extends View {
     }
 
     private void drawLyrics(Canvas canvas, boolean staticPass) {
-        float inset = Math.max(12f * unit(), getWidth() * .035f);
-        RectF content = new RectF(inset, inset,
-                getWidth() - inset, getHeight() - inset);
+        RectF[] areas = lyricsAreas();
+        RectF songArea = areas[2];
         if (staticPass) {
-            float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
-            RectF leftPanel = new RectF(content.left - 6f * unit(),
-                    content.top - 6f * unit(), content.left + leftWidth + 6f * unit(),
-                    content.bottom + 6f * unit());
-            RectF rightPanel = new RectF(leftPanel.right + 6f * unit(),
-                    content.top - 6f * unit(), content.right + 6f * unit(),
-                    content.bottom + 6f * unit());
             Path leftShape = new Path();
             Path rightShape = new Path();
-            float radius = Math.min(18f * unit(), content.height() * .12f);
-            leftShape.addRoundRect(leftPanel, radius, radius, Path.Direction.CW);
-            rightShape.addRoundRect(rightPanel, radius, radius, Path.Direction.CW);
-            drawGlassSurface(canvas, leftShape, leftPanel, colours.surfaceContainerHigh);
-            drawGlassSurface(canvas, rightShape, rightPanel, colours.surfaceContainerHigh);
+            float radius = Math.min(18f * unit(), areas[1].height() * .12f);
+            leftShape.addRoundRect(areas[0], radius, radius, Path.Direction.CW);
+            rightShape.addRoundRect(areas[1], radius, radius, Path.Direction.CW);
+            drawGlassSurface(canvas, leftShape, areas[0], colours.surfaceContainerHigh);
+            drawGlassSurface(canvas, rightShape, areas[1], colours.surfaceContainerHigh);
         }
+        RectF content = new RectF(songArea);
+        content.union(areas[3]);
         canvas.save();
         canvas.clipRect(content);
         MediaControlLayout controls = lyricsControlLayout();
-        float titleReserve = Math.min(20f * unit(), content.height() * .15f) * .80f * 2.5f
+        float titleReserve = Math.min(20f * unit(), songArea.height() * .15f) * .80f * 2.5f
                 + 16f * unit();
-        float artSize = Math.max(0f, Math.min(Math.min(content.height() * .50f,
-                content.width() * .31f), controls.playPause.top - content.top - titleReserve));
-        RectF artBounds = new RectF(content.left, content.top,
-                content.left + artSize, content.top + artSize);
+        float artSize = Math.max(0f, Math.min(Math.min(songArea.height() * .50f,
+                songArea.width()), controls.playPause.top - songArea.top - titleReserve));
+        RectF artBounds = new RectF(songArea.left, songArea.top,
+                songArea.left + artSize, songArea.top + artSize);
         if (staticPass && artSize > 0f) {
             drawLyricsArt(canvas, artBounds);
         }
-        float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
-        float titleSize = Math.min(20f * unit(), content.height() * .15f) * .80f;
+        float leftWidth = songArea.width();
+        float titleSize = Math.min(20f * unit(), songArea.height() * .15f) * .80f;
         float titleY = artBounds.bottom + 8f * unit() + titleSize;
         if (staticPass && media != null) {
             if (media.controller == null) {
-                drawEmptyMediaText(canvas, new RectF(content.left, artBounds.bottom,
-                        content.left + leftWidth, content.bottom), titleSize, titleSize * .72f);
+                drawEmptyMediaText(canvas, new RectF(songArea.left, artBounds.bottom,
+                        songArea.right, songArea.bottom), titleSize, titleSize * .72f);
             } else {
                 text(canvas, media.quran == null ? media.title
-                            : media.quran.surah.transliteration, content.left, titleY, titleSize,
+                            : media.quran.surah.transliteration, songArea.left, titleY, titleSize,
                         CREAM, Fonts.semibold(getContext()), leftWidth);
-                text(canvas, media.artist, content.left,
+                text(canvas, media.artist, songArea.left,
                         titleY + titleSize * 1.2f, titleSize * .72f,
                         SAGE, Fonts.regular(getContext()), leftWidth);
                 if (displayedQuran != null && quranApproximate) {
                     String label = "ms".equals(AppLocale.locale(getContext()).getLanguage())
                             ? "Anggaran" : "Approximate";
-                    text(canvas, label, content.left, titleY + titleSize * 2.05f,
+                    text(canvas, label, songArea.left, titleY + titleSize * 2.05f,
                             titleSize * .55f, SAGE, Fonts.regular(getContext()), leftWidth);
                 }
             }
         }
-        float lyricLeft = content.left + leftWidth
-                + Math.max(16f * unit(), content.width() * .05f);
-        RectF lyricArea = new RectF(lyricLeft, content.top,
-                content.right, content.bottom);
+        RectF lyricArea = new RectF(areas[3]);
         if (media != null && media.isQuranSession) {
             if (!staticPass) {
                 drawQuran(canvas, lyricArea);
@@ -2626,8 +2688,11 @@ public final class BoardView extends View {
     private android.graphics.drawable.Drawable musicNote;
 
     void drawMedia(Canvas canvas, RectF r) {
-        float artworkSize = Math.min(r.height() * .95f, r.width() * .45f);
-        float artworkTop = r.centerY() - artworkSize / 2f;
+        boolean tall = tallMediaCard(r) && media != null && media.controller != null;
+        boolean header = tall && cardLyrics();
+        float artworkSize = header ? Math.min(r.height() * .26f, r.width() * .24f)
+                : Math.min(r.height() * .95f, r.width() * .45f);
+        float artworkTop = header ? r.top : r.centerY() - artworkSize / 2f;
         RectF artwork = new RectF(r.left, artworkTop,
                 r.left + artworkSize, artworkTop + artworkSize);
         Path artShape = cookiePath(artwork);
@@ -2674,6 +2739,45 @@ public final class BoardView extends View {
             return;
         }
         MediaControlLayout controls = mediaControlLayout(r);
+        if (header) {
+            // Lyrics below: title and artist sit beside the artwork at the top.
+            float size = Math.min(22f * unit(), artworkSize * .26f);
+            float block = size * 1.25f + size * .8f;
+            float top = artwork.centerY() - block / 2f;
+            text(canvas, title, x, top + size, size, CREAM, Fonts.semibold(getContext()), width);
+            text(canvas, artist, x, top + size * 1.25f + size * .8f, size * .72f, SAGE,
+                    Fonts.regular(getContext()), width);
+            return;
+        }
+        if (tall) {
+            // No lyrics: a bigger title and artist centred in the space above the timeline.
+            float size = Math.min(26f * unit(), r.height() * .09f);
+            TextPaint big = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            big.setTypeface(Fonts.semibold(getContext()));
+            big.setTextSize(size);
+            big.setColor(playing ? CREAM : SAGE);
+            StaticLayout name = StaticLayout.Builder.obtain(title, 0, title.length(), big,
+                            Math.max(1, Math.round(width)))
+                    .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
+                    .setIncludePad(false).setMaxLines(2)
+                    .setEllipsize(TextUtils.TruncateAt.END).build();
+            float bottom = controls.playPause.top - 12f * unit();
+            float block = name.getHeight() + size * 1.3f;
+            float top = r.top + (bottom - r.top - block) / 2f;
+            canvas.save();
+            canvas.translate(x, top);
+            name.draw(canvas);
+            canvas.restore();
+            Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
+            small.setTypeface(Fonts.regular(getContext()));
+            small.setTextSize(size * .7f);
+            String shown = TextUtils.ellipsize(artist, new TextPaint(small), width,
+                    TextUtils.TruncateAt.END).toString();
+            text(canvas, shown, x + (width - small.measureText(shown)) / 2f,
+                    top + name.getHeight() + size * 1.05f, size * .7f, SAGE,
+                    Fonts.regular(getContext()), width);
+            return;
+        }
         if (MediaControlLayout.isCompact(r.height(), width, controlDpScale())) {
             float compactSize = Math.min(19f * unit(), r.height() * .25f);
             float titleBottom = Math.min(controls.playPause.top - 3f * unit(),
@@ -2839,6 +2943,9 @@ public final class BoardView extends View {
                 canvas.drawPath(wave, paint);
             }
             paint.setStyle(Paint.Style.FILL);
+            if (tallMediaCard(r) && cardLyrics()) {
+                drawCardLyrics(canvas, r);
+            }
             if (alpha < 1f) {
                 canvas.restore();
             }

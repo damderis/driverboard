@@ -69,10 +69,15 @@ public final class BoardScreen extends Screen {
     private final Runnable lyricsTick = new Runnable() {
         @Override
         public void run() {
-            if (!started || browserMode || !lyricsVisible || surface == null || !surface.isValid()) {
+            if (!started || browserMode || surface == null || !surface.isValid()) {
                 return;
             }
             WidgetData.MediaSnapshot media = WidgetData.mediaSnapshot(getCarContext());
+            // Off the lyrics page this keeps song lyrics in step for the music card.
+            if (!lyricsVisible && media.isQuranSession) {
+                handler.postDelayed(this, 1000);
+                return;
+            }
             if (media.isQuranSession) {
                 String metadataKey = media.title + "\u0000" + media.artist + "\u0000"
                         + (media.controller == null ? "" : media.controller.getSessionToken());
@@ -298,36 +303,42 @@ public final class BoardScreen extends Screen {
 
     private GridTemplate shortcutContent(android.content.Context strings) {
         ItemList.Builder items = new ItemList.Builder();
-        boolean returnToBoard = browserMode || lyricsVisible || Store.page(getCarContext()) == 1;
-        items.addItem(shortcutTile(strings.getString(returnToBoard ? R.string.board : R.string.page_media),
-                R.drawable.ic_music_note, () -> {
-                    if (browserMode) closeBrowser();
-                    else if (lyricsVisible) toggleLyrics();
-                    else changePage(Store.page(getCarContext()) == 1 ? -1 : 1 - Store.page(getCarContext()));
-                }));
-        items.addItem(shortcutTile(strings.getString(R.string.lyrics), R.drawable.ic_shortcut_lyrics,
-                () -> {
-                    if (browserMode) closeBrowser();
-                    toggleLyrics();
-                }));
-        items.addItem(shortcutTile(strings.getString(R.string.web), R.drawable.ic_shortcut_web,
-                () -> openBrowser("https://www.google.com")));
-        boolean audioSwitch = AudioSwitchClient.read(getCarContext()).installed;
-        shortcutTiles = audioSwitch ? 5 : 4;
-        if (audioSwitch) {
+        int tiles = 0;
+        if (browserMode || lyricsVisible) {
+            // The lyrics page (opened from the music card) needs a way back.
+            items.addItem(shortcutTile(strings.getString(R.string.board), R.drawable.ic_music_note,
+                    () -> {
+                        if (browserMode) closeBrowser();
+                        else toggleLyrics();
+                    }));
+            tiles++;
+        }
+        items.addItem(shortcutTile(strings.getString(R.string.home), R.drawable.ic_shortcut_home,
+                () -> navigateTo(strings.getString(R.string.home_query))));
+        items.addItem(shortcutTile(strings.getString(R.string.charging_station),
+                R.drawable.ic_shortcut_charging,
+                () -> navigateTo(strings.getString(R.string.charging_query))));
+        // The browser runs in the DriveBoard navigation entry, which can go full screen.
+        items.addItem(shortcutTile(strings.getString(R.string.web), R.drawable.ic_shortcut_web, () -> {
+            try {
+                getCarContext().startCarApp(new android.content.Intent()
+                        .setComponent(new android.content.ComponentName(getCarContext(),
+                                DriveBoardService.class))
+                        .putExtra(DriveBoardService.EXTRA_OPEN, DriveBoardService.OPEN_WEB));
+            } catch (RuntimeException error) {
+                CarDiagnostics.log(getCarContext(), "Open DriveBoard web failed: " + error);
+            }
+        }));
+        items.addItem(shortcutTile(strings.getString(R.string.nearest_mosque),
+                R.drawable.ic_shortcut_mosque, () -> navigateTo("masjid")));
+        tiles += 4;
+        if (AudioSwitchClient.read(getCarContext()).installed) {
             items.addItem(shortcutTile(strings.getString(R.string.page_controls),
                     R.drawable.ic_shortcut_controls, () -> getScreenManager().push(
                             new ControlsScreen(getCarContext(), this))));
+            tiles++;
         }
-        items.addItem(shortcutTile(strings.getString(R.string.nearest_mosque),
-                R.drawable.ic_shortcut_mosque, () -> {
-                    try {
-                        getCarContext().startCarApp(new android.content.Intent(
-                                CarContext.ACTION_NAVIGATE, android.net.Uri.parse("geo:0,0?q=masjid")));
-                    } catch (RuntimeException error) {
-                        CarDiagnostics.log(getCarContext(), "Mosque navigation failed: " + error);
-                    }
-                }));
+        shortcutTiles = tiles;
         return new GridTemplate.Builder().setTitle(strings.getString(R.string.app_name))
                 .setSingleList(items.build()).build();
     }
@@ -579,9 +590,31 @@ public final class BoardScreen extends Screen {
         } else {
             drawBoard();
         }
-        if (lyricsVisible) {
-            handler.removeCallbacks(lyricsTick);
-            handler.post(lyricsTick);
+        handler.removeCallbacks(lyricsTick);
+        handler.post(lyricsTick);
+        if (pendingWeb) {
+            pendingWeb = false;
+            handler.postDelayed(() -> openBrowser("https://www.google.com"), 300);
+        }
+    }
+
+    private boolean pendingWeb;
+
+    /** DriveBoard Peta's Web tile opens the browser here, in the navigation entry. */
+    public void openWebWhenReady() {
+        if (started && surface != null && surface.isValid()) {
+            openBrowser("https://www.google.com");
+        } else {
+            pendingWeb = true;
+        }
+    }
+
+    private void navigateTo(String query) {
+        try {
+            getCarContext().startCarApp(new android.content.Intent(CarContext.ACTION_NAVIGATE,
+                    android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query))));
+        } catch (RuntimeException error) {
+            CarDiagnostics.log(getCarContext(), "Navigate " + query + " failed: " + error);
         }
     }
 
@@ -920,7 +953,7 @@ public final class BoardScreen extends Screen {
         }
         // Android Auto reserves a left column for the weather template's panel but its card only
         // fills the top. Draw across the whole width and lay the board around that card.
-        if (usesWeatherTemplate() && !lyricsVisible && stableArea.left > width * .25f) {
+        if (usesWeatherTemplate() && stableArea.left > width * .25f) {
             // ponytail: the host does not report its panel size. Its grid tiles scale with the
             // panel's width, so the height is estimated from that width: on the DHU a 415px-wide
             // card had an 80px header and 128px per row of two tiles. The e.MAS 5 head unit draws
@@ -978,7 +1011,7 @@ public final class BoardScreen extends Screen {
             refreshNeeded = false;
             lastRefresh = refreshNow;
             board.refresh();
-            if (lyricsVisible) {
+            if (lyricsVisible || !WidgetData.mediaSnapshot(getCarContext()).isQuranSession) {
                 updateLyrics();
             }
         }
@@ -1247,8 +1280,6 @@ public final class BoardScreen extends Screen {
             board.setLyricsLoading(false);
             handler.removeCallbacks(lyricsTick);
             handler.post(lyricsTick);
-        } else {
-            handler.removeCallbacks(lyricsTick);
         }
         refreshShortcutGrid();
         drawBoard();
@@ -1305,7 +1336,7 @@ public final class BoardScreen extends Screen {
             board.setLyricsLoading(!key.isEmpty());
             if (!key.isEmpty()) {
                 LyricsRepository.request(getCarContext(), media, result -> {
-                    if (!started || !lyricsVisible || !key.equals(lyricsTrackKey)) {
+                    if (!started || !key.equals(lyricsTrackKey)) {
                         return;
                     }
                     board.setLyrics(result);

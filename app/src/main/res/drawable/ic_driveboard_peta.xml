@@ -1,0 +1,5 @@
+<!-- DriveBoard Peta: the DriveBoard tile colours as a map pin, so it differs from DriveBoard. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#88D8CF" android:pathData="M0,0h48v48h-48z"/>
+    <path android:fillColor="#111B2C" android:pathData="M24,7c-7.2,0 -13,5.8 -13,13c0,9.6 13,22 13,22s13,-12.4 13,-22c0,-7.2 -5.8,-13 -13,-13zM24,25.5c-3,0 -5.5,-2.5 -5.5,-5.5s2.5,-5.5 5.5,-5.5s5.5,2.5 5.5,5.5s-2.5,5.5 -5.5,5.5z"/>
+</vector>

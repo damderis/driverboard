@@ -28,6 +28,8 @@
 <string name="locating">Mencari zon solat…</string>
 <string name="location_unavailable">Lokasi tidak tersedia — pilih zon</string>
 <string name="nearest_mosque">Masjid terdekat</string>
+    <string name="home">Rumah</string>
+    <string name="charging_station">Pengecas</string>
 <string name="browser_host_unsupported">Hos ini memerlukan API aplikasi kereta 7 atau lebih baharu untuk memaparkan pelayar.</string>
 <string name="surface_host_unsupported">Paparan ini memerlukan API aplikasi kereta 7 atau lebih baharu.</string>
 </resources>

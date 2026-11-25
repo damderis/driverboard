@@ -29,6 +29,10 @@
 <string name="locating">Finding prayer zone…</string>
 <string name="location_unavailable">Location unavailable — pick a zone</string>
 <string name="nearest_mosque">Nearest mosque</string>
+    <string name="home">Home</string>
+    <string name="charging_station">Charging</string>
+    <string name="home_query" translatable="false">Home</string>
+    <string name="charging_query" translatable="false">EV charging station</string>
 <string name="browser_host_unsupported">This host needs car app API 7 or newer to show the browser.</string>
 <string name="surface_host_unsupported">This view needs car app API 7 or newer.</string>
 </resources>

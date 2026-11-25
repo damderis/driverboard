@@ -21,7 +21,7 @@
         <service android:name=".DriveBoardService" android:exported="true">
             <intent-filter><action android:name="androidx.car.app.CarAppService"/><category android:name="androidx.car.app.category.NAVIGATION"/></intent-filter>
         </service>
-        <service android:name=".DriveBoardPetaService" android:exported="true" android:label="@string/app_name_peta">
+        <service android:name=".DriveBoardPetaService" android:exported="true" android:label="@string/app_name_peta" android:icon="@drawable/ic_driveboard_peta">
             <intent-filter><action android:name="androidx.car.app.CarAppService"/><category android:name="androidx.car.app.category.WEATHER"/></intent-filter>
         </service>
         <service android:name=".MediaAccessService" android:label="@string/media_service_name" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
