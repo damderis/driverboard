@@ -992,11 +992,11 @@ public final class BoardScreen extends Screen {
             // ponytail: the host does not report its panel size. Its grid tiles scale with the
             // panel's width, so the height is estimated from that width: on the DHU a 415px-wide
             // card had an 80px header and 128px per row of two tiles. The e.MAS 5 head unit draws
-            // the column 584px wide (DHU 440). The 5% slack keeps the weather card clear of it.
+            // the column 584px wide (DHU 440). The 2% slack keeps the weather card clear of it.
             float margin = height * .0112f;
             float cardWidth = stableArea.left - 2 * margin;
             int rows = (shortcutCount() + 1) / 2;
-            float panelBottom = margin + cardWidth * (.193f + rows * .308f) * 1.05f;
+            float panelBottom = margin + cardWidth * (.193f + rows * .308f) * 1.02f;
             board.setPanelColumn(margin, stableArea.left - margin, margin,
                     panelBottom, stableArea.left);
             drawArea.set(0, 0, width, height);

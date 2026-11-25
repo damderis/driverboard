@@ -1187,14 +1187,17 @@ public final class BoardView extends View {
         float bottom = height - panelTop;
         float right = width - panelLeft;
         float rightLeft = Math.max(panelRight + gutter, panelStableLeft);
-        float split = top + (bottom - top) * .36f;
+        // One row line for both columns: below the panel on the left, prayer/music on the
+        // right. A taller panel (more tiles) moves the line down, up to half the height.
+        float split = Math.min(top + (bottom - top) * .5f,
+                Math.max(top + (bottom - top) * .25f, panelBottom + gutter / 2f));
         switch (card.type) {
             case "prayer":
                 return new RectF(rightLeft, top, right, split - gutter / 2f);
             case "media":
                 return new RectF(rightLeft, split + gutter / 2f, right, bottom);
             case "weather":
-                return new RectF(panelLeft, Math.min(panelBottom + gutter, bottom - 1f),
+                return new RectF(panelLeft, Math.max(split + gutter / 2f, panelBottom + gutter),
                         panelRight, bottom);
             default:
                 return new RectF();
