@@ -203,6 +203,7 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
         addMediaRow(card);
         addNavigationRow(card);
         addNavAppRow(card);
+        addHomeRow(card);
         addWeatherRow(card);
         addBackgroundRow(card);
         addColoursRow(card);
@@ -499,6 +500,60 @@ public final class MainActivity extends AppCompatActivity implements SharedPrefe
                     .setNegativeButton(android.R.string.cancel, null)
                     .show();
         });
+    }
+
+    /** Home for DriveBoard Peta's Home tile: "lat,lng" or a typed address (pref "home"). */
+    private void addHomeRow(LinearLayout card) {
+        LinearLayout item = row(card, true);
+        LinearLayout labels = column();
+        labels.addView(text(getString(R.string.home_address), 15, true));
+        String saved = Store.prefs(this).getString("home", "");
+        TextView value = detail(labels, saved.isEmpty() ? getString(R.string.home_not_set) : saved);
+        item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        item.setOnClickListener(view -> {
+            android.widget.EditText input = new android.widget.EditText(this);
+            input.setText(Store.prefs(this).getString("home", ""));
+            input.setHint(R.string.home_hint);
+            input.setSingleLine(true);
+            android.widget.FrameLayout box = new android.widget.FrameLayout(this);
+            box.setPadding(dp(24), dp(8), dp(24), 0);
+            box.addView(input);
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.home_address)
+                    .setView(box)
+                    .setPositiveButton(android.R.string.ok, (dialog, which) ->
+                            saveHome(input.getText().toString().trim(), value))
+                    .setNeutralButton(R.string.home_use_location, (dialog, which) ->
+                            homeFromLocation(value))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        });
+    }
+
+    private void saveHome(String home, TextView value) {
+        Store.prefs(this).edit().putString("home", home).apply();
+        value.setText(home.isEmpty() ? getString(R.string.home_not_set) : home);
+    }
+
+    private void homeFromLocation(TextView value) {
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.ACCESS_FINE_LOCATION},
+                    REQUEST_PARKED_LOCATION);
+            return;
+        }
+        value.setText(R.string.locating);
+        android.location.LocationManager manager =
+                getSystemService(android.location.LocationManager.class);
+        manager.getCurrentLocation(android.location.LocationManager.GPS_PROVIDER, null,
+                getMainExecutor(), location -> {
+                    if (location == null) {
+                        value.setText(R.string.location_unavailable);
+                        return;
+                    }
+                    saveHome(String.format(java.util.Locale.ROOT, "%.6f,%.6f",
+                            location.getLatitude(), location.getLongitude()), value);
+                });
     }
 
     private void addParkedDetectionRow(LinearLayout card) {

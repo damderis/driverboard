@@ -31,6 +31,10 @@
     <string name="home">Rumah</string>
     <string name="charging_station">Pengecas</string>
     <string name="nav_app">Aplikasi navigasi</string>
+    <string name="home_address">Alamat rumah</string>
+    <string name="home_not_set">Belum ditetapkan: butang Rumah mencari &quot;Home&quot;</string>
+    <string name="home_hint">Alamat, atau latitud,longitud</string>
+    <string name="home_use_location">Guna lokasi semasa</string>
     <string name="nav_app_auto">Automatik (Android Auto pilih)</string>
 <string name="browser_host_unsupported">Hos ini memerlukan API aplikasi kereta 7 atau lebih baharu untuk memaparkan pelayar.</string>
 <string name="surface_host_unsupported">Paparan ini memerlukan API aplikasi kereta 7 atau lebih baharu.</string>

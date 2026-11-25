@@ -32,6 +32,10 @@
     <string name="home">Home</string>
     <string name="charging_station">Charging</string>
     <string name="nav_app">Navigation app</string>
+    <string name="home_address">Home address</string>
+    <string name="home_not_set">Not set: the Home tile searches &quot;Home&quot;</string>
+    <string name="home_hint">Address, or latitude,longitude</string>
+    <string name="home_use_location">Use current location</string>
     <string name="nav_app_auto">Automatic (Android Auto picks)</string>
     <string name="home_query" translatable="false">Home</string>
     <string name="charging_query" translatable="false">EV charging station</string>

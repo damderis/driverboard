@@ -314,7 +314,7 @@ public final class BoardScreen extends Screen {
             tiles++;
         }
         items.addItem(shortcutTile(strings.getString(R.string.home), R.drawable.ic_shortcut_home,
-                () -> navigateTo(strings.getString(R.string.home_query))));
+                () -> navigateHome(strings.getString(R.string.home_query))));
         items.addItem(shortcutTile(strings.getString(R.string.charging_station),
                 R.drawable.ic_shortcut_charging,
                 () -> navigateTo(strings.getString(R.string.charging_query))));
@@ -609,9 +609,24 @@ public final class BoardScreen extends Screen {
         }
     }
 
+    /** The Home tile: the phone app's saved home ("lat,lng" or an address), else a "Home" search. */
+    private void navigateHome(String fallback) {
+        String home = prefs.getString("home", "").trim();
+        if (home.matches("-?\\d+(\\.\\d+)?\\s*,\\s*-?\\d+(\\.\\d+)?")) {
+            String point = home.replaceAll("\\s", "");
+            navigateUri("geo:" + point + "?q=" + point, "home " + point);
+        } else {
+            navigateTo(home.isEmpty() ? fallback : home);
+        }
+    }
+
     private void navigateTo(String query) {
+        navigateUri("geo:0,0?q=" + android.net.Uri.encode(query), query);
+    }
+
+    private void navigateUri(String uri, String query) {
         android.content.Intent intent = new android.content.Intent(CarContext.ACTION_NAVIGATE,
-                android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query)));
+                android.net.Uri.parse(uri));
         String app = prefs.getString("nav_app", "");
         if (!app.isEmpty()) {
             // The phone app's "Navigation app" choice; Android Auto may still route it elsewhere.
