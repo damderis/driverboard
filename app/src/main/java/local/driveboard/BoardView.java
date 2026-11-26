@@ -2087,7 +2087,6 @@ public final class BoardView extends View {
         canvas.clipRect(area);
         canvas.translate(0, offset);
         float h = area.height();
-        float gap = Math.max(2f * unit(), h * .025f);
         if (metadata.ayah <= 0) {
             drawQuranText(canvas, metadata.surah.arabic,
                     new RectF(area.left, area.top, area.right, area.top + h * .6f),
@@ -2098,24 +2097,22 @@ public final class BoardView extends View {
             canvas.restore();
             return;
         }
-        String previous = quranDocument == null || metadata.ayah <= 1 ? ""
-                : quranDocument.text(QuranRepository.QURAN_UTHMANI, metadata.ayah - 1);
+        // Current ayah, marker, translation, then the NEXT ayah dimmed as a preview.
+        String next = quranDocument == null ? null
+                : quranDocument.text(QuranRepository.QURAN_UTHMANI, metadata.ayah + 1);
+        if (next == null) next = "";
         String arabic = quranDocument == null ? DASH
                 : quranDocument.text(QuranRepository.QURAN_UTHMANI, metadata.ayah);
         String translation = quranDocument == null ? DASH
                 : quranDocument.text(quranEdition, metadata.ayah);
-        drawQuranText(canvas, previous,
-                new RectF(area.left, area.top, area.right, area.top + h * .16f),
-                Math.min(16f * unit(), h * .12f), withAlpha(colours.onSurface, .45f), true, 2);
         drawQuranText(canvas, arabic,
-                new RectF(area.left, area.top + h * .16f + gap,
-                        area.right, area.top + h * .61f),
+                new RectF(area.left, area.top, area.right, area.top + h * .47f),
                 Math.min(34f * unit(), h * .25f), colours.primary, true, 4);
         // Ayah marker: an eight-pointed star (two overlaid squares) with the number centred,
         // drawn as geometry so it never shifts with the Arabic font's glyph metrics.
         float radius = Math.max(14f * controlDpScale(), Math.min(16f * unit(), h * .075f));
         float centerX = area.centerX();
-        float centerY = area.top + h * .69f;
+        float centerY = area.top + h * .55f;
         Path star = new Path();
         float side = radius * 1.42f;
         star.addRect(centerX - side / 2f, centerY - side / 2f, centerX + side / 2f,
@@ -2144,8 +2141,27 @@ public final class BoardView extends View {
         Paint.FontMetrics metrics = digits.getFontMetrics();
         canvas.drawText(number, centerX, centerY - (metrics.ascent + metrics.descent) / 2f, digits);
         drawQuranText(canvas, translation,
-                new RectF(area.left, area.top + h * .78f, area.right, area.bottom),
-                Math.min(16f * unit(), h * .12f), colours.onSurface, false, 4);
+                new RectF(area.left, area.top + h * .62f, area.right, area.top + h * .80f),
+                Math.min(16f * unit(), h * .12f), colours.onSurface, false, 3);
+        if (!next.isEmpty()) {
+            // A preview: readable size, one line, cut with an ellipsis rather than shrunk.
+            if (quranTypeface == null) quranTypeface = getResources().getFont(R.font.amiri_quran);
+            TextPaint preview = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            preview.setTypeface(quranTypeface);
+            preview.setColor(withAlpha(colours.onSurface, .45f));
+            preview.setTextSize(Math.max(20f * controlDpScale(), Math.min(22f * unit(), h * .08f)));
+            StaticLayout line = StaticLayout.Builder.obtain(next, 0, next.length(), preview,
+                            Math.max(1, (int) area.width()))
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                    .setTextDirection(TextDirectionHeuristics.RTL)
+                    .setMaxLines(1).setEllipsize(TextUtils.TruncateAt.END)
+                    .setIncludePad(false).build();
+            float top = area.top + h * .91f - line.getHeight() / 2f;
+            canvas.save();
+            canvas.translate(area.left, top);
+            line.draw(canvas);
+            canvas.restore();
+        }
         canvas.restore();
     }
 
