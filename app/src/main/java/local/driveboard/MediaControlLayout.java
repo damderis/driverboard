@@ -80,6 +80,13 @@ public final class MediaControlLayout {
         return new MediaControlLayout(previous, playPause, next);
     }
 
+    /** Three buttons of {@code size} along the bottom of [left, right]: edges and centre. */
+    public static MediaControlLayout row(float left, float right, float bottom, float size) {
+        float top = bottom - size;
+        return new MediaControlLayout(square(left, top, size),
+                square((left + right - size) / 2f, top, size), square(right - size, top, size));
+    }
+
     /** Same-size buttons spread over [left, right]: previous, play centred, next at the edge. */
     public static MediaControlLayout spread(MediaControlLayout normal, float left, float right) {
         if (normal.previous == null || normal.next == null) return normal;

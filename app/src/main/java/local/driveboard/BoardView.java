@@ -480,18 +480,14 @@ public final class BoardView extends View {
         int index = lyricsLineIndex();
         LyricsDocument.Line[] lines = displayLyrics.lines;
         if (area.height() < 20f * unit() || lines.length == 0) return;
-        if (index < 0) {
-            // Intro, before the first line: show what comes first, dimmed.
-            float size = Math.min(17f * unit(), area.height() * .22f);
-            text(canvas, lines[0].text, area.left, area.centerY() + size * .35f, size * .9f,
-                    SAGE, Fonts.regular(getContext()), area.width());
-            return;
-        }
+        // Intro, before the first line: the same layout, dimmed until the singing starts.
+        boolean intro = index < 0;
+        if (intro) index = 0;
         float size = Math.min(17f * unit(), area.height() * .22f);
         TextPaint current = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         current.setTypeface(Fonts.semibold(getContext()));
         current.setTextSize(size);
-        current.setColor(BRASS);
+        current.setColor(intro ? SAGE : BRASS);
         StaticLayout now = StaticLayout.Builder.obtain(lines[index].text, 0,
                         lines[index].text.length(), current, Math.max(1, Math.round(area.width())))
                 .setIncludePad(false).setMaxLines(2).setEllipsize(TextUtils.TruncateAt.END).build();
@@ -733,10 +729,12 @@ public final class BoardView extends View {
 
     private MediaControlLayout mediaControlLayout(RectF r) {
         if (tallMediaCard(r)) {
-            // Tall cards: the timeline and buttons span the card; the buttons keep their usual size.
-            float left = r.left + Math.min(r.height() * .95f, r.width() * .45f) + 10f * unit();
-            return MediaControlLayout.spread(MediaControlLayout.create(left, r.top, r.right,
-                    r.bottom, controlDpScale(), r.width(), r.height()), r.left, r.right);
+            // Tall cards: previous / play / next across the card at a fixed, density-aware size
+            // (48-64 dp), so a dense head unit never drops to a lone off-centre play button.
+            float dp = controlDpScale();
+            float size = Math.max(48f * dp, Math.min(64f * dp,
+                    Math.min(r.height() * .15f, r.width() / 5f)));
+            return MediaControlLayout.row(r.left, r.right, r.bottom, size);
         }
         return MediaControlLayout.create(mediaControlsLeft(r), r.top,
                 r.right, r.bottom, controlDpScale(), r.width(), r.height());
@@ -763,6 +761,26 @@ public final class BoardView extends View {
         }
         float inset = Math.max(12f * unit(), w * .035f);
         RectF content = new RectF(inset, inset, w - inset, h - inset);
+        if (w < h * .85f) {
+            // Narrow (one-third) panel: stack a compact song card on top and the lyrics below,
+            // instead of squeezing two columns side by side.
+            // Cards fill the panel with one gap; content sits an even 20 dp inside each card.
+            // The song card is just tall enough for the cover row, timeline and controls,
+            // so the lyrics card gets the rest.
+            float dp = controlDpScale();
+            float inner = 20f * dp;
+            float gap = 12f * dp;
+            RectF panel = new RectF(edge(), edge(), w - edge(), h - edge());
+            float songHeight = Math.min(panel.height() * .34f,
+                    panel.width() * .20f + 56f * dp + 30f * dp + 2f * inner);
+            RectF song = new RectF(panel.left, panel.top, panel.right, panel.top + songHeight);
+            RectF text = new RectF(panel.left, song.bottom + gap, panel.right, panel.bottom);
+            return new RectF[] {song, text,
+                    new RectF(song.left + inner, song.top + inner, song.right - inner,
+                            song.bottom - inner),
+                    new RectF(text.left + inner, text.top + inner, text.right - inner,
+                            text.bottom - inner)};
+        }
         float leftWidth = Math.min(content.height() * .50f, content.width() * .31f);
         RectF songContent = new RectF(content.left, content.top, content.left + leftWidth, content.bottom);
         RectF textContent = new RectF(content.left + leftWidth
@@ -776,8 +794,11 @@ public final class BoardView extends View {
 
     private MediaControlLayout lyricsControlLayout() {
         RectF song = lyricsAreas()[2];
-        return MediaControlLayout.create(song.left, song.top, song.right, song.bottom,
-                controlDpScale());
+        // Same row as the music card: previous / play / next across the song card.
+        float dp = controlDpScale();
+        float size = Math.max(44f * dp, Math.min(60f * dp,
+                Math.min(song.height() * .22f, song.width() / 5f)));
+        return MediaControlLayout.row(song.left, song.right, song.bottom, size);
     }
 
     private MediaControlLayout currentControlLayout() {
@@ -1510,6 +1531,9 @@ public final class BoardView extends View {
                 Math.min(18f * unit(), Math.min(r.width(), r.height()) * .15f));
         if (WidgetType.fromId(c.type).padding == WidgetType.Padding.MEDIA) {
             pad = Math.max(2f * unit(), Math.min(r.width(), r.height()) * .08f);
+        } else if (panelColumn()) {
+            // Rounded panel-style cards: an even inset matching the corner.
+            pad = 20f * controlDpScale();
         } else if (WidgetType.fromId(c.type).padding == WidgetType.Padding.PRAYER) {
             float radius = BoardLayout.prayerRadius(r.width(), r.height());
             pad = Math.min(Math.min(r.width(), r.height()) * .28f,
@@ -1518,7 +1542,7 @@ public final class BoardView extends View {
         RectF content = new RectF(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
         if (WidgetType.fromId(c.type) == WidgetType.WEATHER) {
             float aspect = r.width() / r.height();
-            if (aspect > .75f && aspect < 1.4f) {
+            if (aspect > .75f && aspect < 1.4f && !panelColumn()) {
                 float half = Math.min(r.width(), r.height()) / (float) Math.sqrt(8) * .90f;
                 content = new RectF(r.centerX() - half, r.centerY() - half, r.centerX() + half, r.centerY() + half);
             }
@@ -1704,6 +1728,13 @@ public final class BoardView extends View {
     private Path cardPath(String type, RectF bounds) {
         Path path = new Path();
         float radius = Math.min(bounds.width(), bounds.height());
+        if (panelColumn()) {
+            // Beside Android Auto's panel every card takes the panel's own corner, so the
+            // tiles and the board read as one set.
+            float corner = 20f * controlDpScale();
+            path.addRoundRect(bounds, corner, corner, Path.Direction.CW);
+            return path;
+        }
         if (WidgetType.fromId(type).shape == WidgetType.Shape.WEATHER) {
             float aspect = bounds.width() / bounds.height();
             if (aspect > .75f && aspect < 1.4f) {
@@ -1847,31 +1878,56 @@ public final class BoardView extends View {
         MediaControlLayout controls = lyricsControlLayout();
         float titleReserve = Math.min(20f * unit(), songArea.height() * .15f) * .80f * 2.5f
                 + 16f * unit();
-        float artSize = Math.max(0f, Math.min(Math.min(songArea.height() * .50f,
-                songArea.width()), controls.playPause.top - songArea.top - titleReserve));
-        RectF artBounds = new RectF(songArea.left, songArea.top,
-                songArea.left + artSize, songArea.top + artSize);
+        // A wide song card (narrow panel, or under Android Auto's panel) puts the cover beside
+        // the title; a tall one stacks the cover above it.
+        boolean wide = songArea.width() > songArea.height() * 1.15f;
+        float dp = controlDpScale();
+        float artSize = wide
+                ? Math.max(0f, Math.min(songArea.width() * .22f,
+                        controls.playPause.top - songArea.top - 30f * dp))
+                : Math.max(0f, Math.min(Math.min(songArea.height() * .50f, songArea.width()),
+                        controls.playPause.top - songArea.top - titleReserve));
+        float titleSize = wide ? Math.max(18f * dp, artSize * .20f)
+                : Math.min(20f * unit(), songArea.height() * .15f) * .80f;
+        // Wide card: cover and title/singer as one group, centred in the card.
+        float artLeft = songArea.left;
+        float textGap = 16f * dp;
+        if (wide && media != null && media.controller != null) {
+            Paint measure = new Paint(Paint.ANTI_ALIAS_FLAG);
+            measure.setTypeface(Fonts.semibold(getContext()));
+            measure.setTextSize(titleSize);
+            String title = media.quran == null ? media.title : media.quran.surah.transliteration;
+            float textWidth = measure.measureText(title == null ? "" : title);
+            measure.setTextSize(titleSize * .72f);
+            textWidth = Math.max(textWidth, measure.measureText(
+                    media.artist == null ? "" : media.artist));
+            float group = Math.min(songArea.width(), artSize + textGap + textWidth);
+            artLeft = songArea.centerX() - group / 2f;
+        }
+        RectF artBounds = new RectF(artLeft, songArea.top, artLeft + artSize,
+                songArea.top + artSize);
         if (staticPass && artSize > 0f) {
             drawLyricsArt(canvas, artBounds);
         }
-        float leftWidth = songArea.width();
-        float titleSize = Math.min(20f * unit(), songArea.height() * .15f) * .80f;
-        float titleY = artBounds.bottom + 8f * unit() + titleSize;
+        float textLeft = wide ? artBounds.right + textGap : songArea.left;
+        float leftWidth = songArea.right - textLeft;
+        float titleY = wide ? artBounds.centerY() - titleSize * .1f
+                : artBounds.bottom + 8f * unit() + titleSize;
         if (staticPass && media != null) {
             if (media.controller == null) {
                 drawEmptyMediaText(canvas, new RectF(songArea.left, artBounds.bottom,
                         songArea.right, songArea.bottom), titleSize, titleSize * .72f);
             } else {
                 text(canvas, media.quran == null ? media.title
-                            : media.quran.surah.transliteration, songArea.left, titleY, titleSize,
+                            : media.quran.surah.transliteration, textLeft, titleY, titleSize,
                         CREAM, Fonts.semibold(getContext()), leftWidth);
-                text(canvas, media.artist, songArea.left,
+                text(canvas, media.artist, textLeft,
                         titleY + titleSize * 1.2f, titleSize * .72f,
                         SAGE, Fonts.regular(getContext()), leftWidth);
                 if (displayedQuran != null && quranApproximate) {
                     String label = "ms".equals(AppLocale.locale(getContext()).getLanguage())
                             ? "Anggaran" : "Approximate";
-                    text(canvas, label, songArea.left, titleY + titleSize * 2.05f,
+                    text(canvas, label, textLeft, titleY + titleSize * 2.05f,
                             titleSize * .55f, SAGE, Fonts.regular(getContext()), leftWidth);
                 }
             }
@@ -1988,8 +2044,10 @@ public final class BoardView extends View {
                 ? new int[] {withAlpha(SAGE, .5f), BRASS,
                         withAlpha(CREAM, .75f), withAlpha(CREAM, .48f)}
                 : new int[] {CREAM, CREAM, CREAM, CREAM};
-        float mainSize = Math.min(25f * unit(), area.height() * .22f) * .70f;
-        float sideSize = Math.min(16f * unit(), area.height() * .14f) * .70f;
+        // Density floors keep lyrics readable in the narrow panel, where unit() is small.
+        float dp = controlDpScale();
+        float mainSize = Math.max(26f * dp, Math.min(25f * unit(), area.height() * .22f) * .70f);
+        float sideSize = Math.max(19f * dp, Math.min(16f * unit(), area.height() * .14f) * .70f);
         if (!timed) mainSize = sideSize;
         float gap = Math.max(2f * unit(), area.height() * .045f);
         StaticLayout[] lines = lyricLayouts(indexes, colors, area.width(),
@@ -2053,21 +2111,38 @@ public final class BoardView extends View {
                 new RectF(area.left, area.top + h * .16f + gap,
                         area.right, area.top + h * .61f),
                 Math.min(34f * unit(), h * .25f), colours.primary, true, 4);
-        float radius = Math.min(12f * unit(), h * .075f);
+        // Ayah marker: an eight-pointed star (two overlaid squares) with the number centred,
+        // drawn as geometry so it never shifts with the Arabic font's glyph metrics.
+        float radius = Math.max(14f * controlDpScale(), Math.min(16f * unit(), h * .075f));
+        float centerX = area.centerX();
         float centerY = area.top + h * .69f;
-        paint.setColor(colours.primary);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(Math.max(1f, unit()));
-        canvas.drawCircle(area.centerX(), centerY, radius, paint);
+        Path star = new Path();
+        float side = radius * 1.42f;
+        star.addRect(centerX - side / 2f, centerY - side / 2f, centerX + side / 2f,
+                centerY + side / 2f, Path.Direction.CW);
+        Path diamond = new Path();
+        diamond.moveTo(centerX, centerY - side * .707f);
+        diamond.lineTo(centerX + side * .707f, centerY);
+        diamond.lineTo(centerX, centerY + side * .707f);
+        diamond.lineTo(centerX - side * .707f, centerY);
+        diamond.close();
+        star.op(diamond, Path.Op.UNION);
         paint.setStyle(Paint.Style.FILL);
-        drawQuranText(canvas, "\u06dd", new RectF(area.centerX() - radius * 1.5f,
-                        centerY - radius * 1.5f, area.centerX() + radius * 1.5f,
-                        centerY + radius * 1.5f), radius * 2f,
-                withAlpha(colours.primary, .32f), true, 1);
-        drawQuranText(canvas, String.valueOf(metadata.ayah),
-                new RectF(area.centerX() - radius, centerY - radius,
-                        area.centerX() + radius, centerY + radius), radius * 1.05f,
-                colours.primary, false, 1);
+        paint.setColor(withAlpha(colours.primary, .14f));
+        canvas.drawPath(star, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(1.5f, 1.2f * controlDpScale()));
+        paint.setColor(colours.primary);
+        canvas.drawPath(star, paint);
+        paint.setStyle(Paint.Style.FILL);
+        Paint digits = new Paint(Paint.ANTI_ALIAS_FLAG);
+        digits.setTypeface(Fonts.semibold(getContext()));
+        digits.setColor(colours.primary);
+        digits.setTextAlign(Paint.Align.CENTER);
+        String number = SurahArtText.arabicIndic(metadata.ayah);
+        digits.setTextSize(radius * (number.length() > 2 ? .62f : .8f));
+        Paint.FontMetrics metrics = digits.getFontMetrics();
+        canvas.drawText(number, centerX, centerY - (metrics.ascent + metrics.descent) / 2f, digits);
         drawQuranText(canvas, translation,
                 new RectF(area.left, area.top + h * .78f, area.right, area.bottom),
                 Math.min(16f * unit(), h * .12f), colours.onSurface, false, 4);
